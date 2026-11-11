@@ -27,7 +27,8 @@ router.post('/register', registerLimiter, async (req, res, next) => {
   }
 
   try {
-    const user = createLocalUser({ email, password, displayName });
+    // บัญชีหลักถูกเก็บถาวรใน Firebase Realtime Database (authUsers/...)
+    const user = await createLocalUser({ email, password, displayName });
 
     if (canUseFirebase()) {
       try {
@@ -61,45 +62,53 @@ router.post('/register', registerLimiter, async (req, res, next) => {
   }
 });
 
-router.post('/login', async (req, res) => {
+router.post('/login', async (req, res, next) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: 'กรอกอีเมลและรหัสผ่าน' });
   }
 
-  const user = findUserByEmail(email);
-  if (!user || !verifyPassword(password, user.salt, user.hash)) {
-    return res.status(401).json({ error: 'อีเมลหรือรหัสผ่านไม่ถูกต้อง' });
-  }
+  try {
+    const user = await findUserByEmail(email);
+    if (!user || !verifyPassword(password, user.salt, user.hash)) {
+      return res.status(401).json({ error: 'อีเมลหรือรหัสผ่านไม่ถูกต้อง' });
+    }
 
-  return res.json({
-    message: 'Login successful',
-    ...publicUser(user),
-    token: signToken(user),
-  });
+    return res.json({
+      message: 'Login successful',
+      ...publicUser(user),
+      token: signToken(user),
+    });
+  } catch (error) {
+    return next(error);
+  }
 });
 
-router.post('/forgot-password', otpLimiter, async (req, res) => {
+router.post('/forgot-password', otpLimiter, async (req, res, next) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'กรอกอีเมล' });
 
-  const user = findUserByEmail(email);
-  if (user) {
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000;
-    setOtp(email, otpCode, expiresAt);
-    try {
-      await sendOTPEmail(user.email, otpCode);
-    } catch (error) {
-      console.warn('OTP email skipped:', error.message);
-      return res.status(502).json({
-        error: 'ส่ง OTP ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง หรือตรวจ Brevo configuration',
-        detail: error.message,
-      });
+  try {
+    const user = await findUserByEmail(email);
+    if (user) {
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + 10 * 60 * 1000;
+      await setOtp(email, otpCode, expiresAt);
+      try {
+        await sendOTPEmail(user.email, otpCode);
+      } catch (error) {
+        console.warn('OTP email skipped:', error.message);
+        return res.status(502).json({
+          error: 'ส่ง OTP ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง หรือตรวจ Brevo configuration',
+          detail: error.message,
+        });
+      }
     }
-  }
 
-  return res.json({ message: 'ถ้าอีเมลนี้มีอยู่ในระบบ เราได้ส่ง OTP ไปแล้ว' });
+    return res.json({ message: 'ถ้าอีเมลนี้มีอยู่ในระบบ เราได้ส่ง OTP ไปแล้ว' });
+  } catch (error) {
+    return next(error);
+  }
 });
 
 router.post('/reset-password', async (req, res, next) => {
@@ -107,9 +116,12 @@ router.post('/reset-password', async (req, res, next) => {
   if (!email || !otp || !newPassword) {
     return res.status(400).json({ error: 'กรอกอีเมล OTP และรหัสผ่านใหม่' });
   }
+  if (String(newPassword).length < 8) {
+    return res.status(400).json({ error: 'รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร' });
+  }
 
   try {
-    const user = findUserByEmail(email);
+    const user = await findUserByEmail(email);
     if (!user || !user.otp) {
       return res.status(400).json({ error: 'ไม่พบคำขอ OTP ของอีเมลนี้' });
     }
@@ -120,7 +132,7 @@ router.post('/reset-password', async (req, res, next) => {
       return res.status(400).json({ error: 'รหัส OTP หมดอายุแล้ว' });
     }
 
-    const updated = updateLocalPassword(email, newPassword);
+    const updated = await updateLocalPassword(email, newPassword);
     if (canUseFirebase()) {
       try {
         const firebaseUser = await admin.auth().getUserByEmail(user.email);
