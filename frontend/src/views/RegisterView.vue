@@ -3,6 +3,8 @@ import { ref } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api'
+import AuthLayout from '../components/AuthLayout.vue'
+import AuthField from '../components/AuthField.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -31,31 +33,26 @@ async function submit() {
 </script>
 
 <template>
-  <main class="flex min-h-screen items-center justify-center bg-canvas p-4">
-    <form class="w-full max-w-sm rounded-lg border border-line bg-white p-6" @submit.prevent="submit" novalidate>
-      <h1 class="text-2xl font-bold">สมัครสมาชิก</h1>
+  <AuthLayout>
+    <form class="flex flex-col rounded-3xl border border-line bg-white p-8 shadow-md sm:p-10" @submit.prevent="submit" novalidate>
+      <h1 class="text-3xl font-semibold text-ink">สมัครสมาชิก</h1>
+      <p class="mt-2 text-sm text-muted">สร้างบัญชีเพื่อเริ่มจัดตารางสอน</p>
 
-      <label class="mt-5 block text-sm font-medium" for="email">อีเมล</label>
-      <input id="email" v-model="email" type="email" autocomplete="email"
-        class="mt-1 w-full rounded border border-line px-3 py-2" />
+      <div class="mt-8 flex flex-col gap-5">
+        <AuthField id="email" v-model="email" label="อีเมล" type="email" autocomplete="email" icon="mail" />
+        <AuthField id="password" v-model="password" label="รหัสผ่าน (อย่างน้อย 8 ตัว)" type="password" autocomplete="new-password" icon="lock" />
+        <AuthField id="confirm" v-model="confirm" label="ยืนยันรหัสผ่าน" type="password" autocomplete="new-password" icon="lock" />
+      </div>
 
-      <label class="mt-4 block text-sm font-medium" for="password">รหัสผ่าน (อย่างน้อย 8 ตัว)</label>
-      <input id="password" v-model="password" type="password" autocomplete="new-password"
-        class="mt-1 w-full rounded border border-line px-3 py-2" />
+      <p v-if="error" class="mt-4 rounded-2xl bg-red-100 px-4 py-2.5 text-sm text-red-800" role="alert">{{ error }}</p>
 
-      <label class="mt-4 block text-sm font-medium" for="confirm">ยืนยันรหัสผ่าน</label>
-      <input id="confirm" v-model="confirm" type="password" autocomplete="new-password"
-        class="mt-1 w-full rounded border border-line px-3 py-2" />
-
-      <p v-if="error" class="mt-3 rounded bg-red-100 px-3 py-2 text-sm text-red-800" role="alert">{{ error }}</p>
-
-      <button type="submit" class="btn mt-5 w-full" :disabled="loading">
+      <button type="submit" class="btn mt-6 h-12 w-full !rounded-full transition-opacity hover:opacity-90" :disabled="loading">
         {{ loading ? 'กำลังสมัคร...' : 'สมัครสมาชิก' }}
       </button>
 
-      <p class="mt-4 text-sm">
-        มีบัญชีอยู่แล้ว? <RouterLink to="/login" class="text-accent">เข้าสู่ระบบ</RouterLink>
+      <p class="mt-5 text-center text-sm text-muted">
+        มีบัญชีอยู่แล้ว? <RouterLink to="/login" class="font-medium text-accent hover:underline">เข้าสู่ระบบ</RouterLink>
       </p>
     </form>
-  </main>
+  </AuthLayout>
 </template>

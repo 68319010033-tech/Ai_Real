@@ -32,3 +32,16 @@ body { margin: 0; background: var(--color-canvas); color: var(--color-ink); }
 .btn-ghost { background: #fff; color: var(--color-ink); border: 1px solid var(--line); }
 
 select { border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; background: #fff; }
+
+/* ช่องกรอกหน้า Login/Register/ForgotPassword: วงเรืองแสงวาดที่กรอบนอกแทน จึงปิด outline ของตัว input */
+.auth-input:focus-visible { outline: none; }
+
+/* พื้นหลัง autofill ของ Chrome/Edge: ให้กลืนกับช่องสีขาว ไม่เป็นสี่เหลี่ยมสีฟ้า */
+.auth-input:-webkit-autofill,
+.auth-input:-webkit-autofill:hover,
+.auth-input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #fff inset;
+  -webkit-text-fill-color: var(--color-ink);
+  caret-color: var(--color-ink);
+  transition: background-color 9999s ease-in-out 0s;
+}

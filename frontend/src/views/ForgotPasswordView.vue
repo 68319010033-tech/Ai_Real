@@ -2,6 +2,8 @@
 import { ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import AuthLayout from '../components/AuthLayout.vue'
+import AuthField from '../components/AuthField.vue'
 
 const auth = useAuthStore()
 const email = ref('')
@@ -25,26 +27,31 @@ async function submit() {
 </script>
 
 <template>
-  <main class="flex min-h-screen items-center justify-center bg-canvas p-4">
-    <form class="w-full max-w-sm rounded-lg border border-line bg-white p-6" @submit.prevent="submit" novalidate>
-      <h1 class="text-2xl font-bold">ลืมรหัสผ่าน</h1>
+  <AuthLayout>
+    <form class="flex flex-col rounded-3xl border border-line bg-white p-8 shadow-md sm:p-10" @submit.prevent="submit" novalidate>
+      <h1 class="text-3xl font-semibold text-ink">ลืมรหัสผ่าน</h1>
 
       <template v-if="!sent">
-        <p class="mt-1 text-sm text-muted">กรอกอีเมลที่ใช้สมัคร เราจะส่งลิงก์รีเซ็ตรหัสผ่านให้</p>
-        <label class="mt-5 block text-sm font-medium" for="email">อีเมล</label>
-        <input id="email" v-model="email" type="email" autocomplete="email"
-          class="mt-1 w-full rounded border border-line px-3 py-2" />
-        <p v-if="error" class="mt-3 rounded bg-red-100 px-3 py-2 text-sm text-red-800" role="alert">{{ error }}</p>
-        <button type="submit" class="btn mt-5 w-full" :disabled="loading">
+        <p class="mt-2 text-sm text-muted">กรอกอีเมลที่ใช้สมัคร เราจะส่งลิงก์รีเซ็ตรหัสผ่านให้</p>
+
+        <div class="mt-8">
+          <AuthField id="email" v-model="email" label="อีเมล" type="email" autocomplete="email" icon="mail" />
+        </div>
+
+        <p v-if="error" class="mt-4 rounded-2xl bg-red-100 px-4 py-2.5 text-sm text-red-800" role="alert">{{ error }}</p>
+
+        <button type="submit" class="btn mt-6 h-12 w-full !rounded-full transition-opacity hover:opacity-90" :disabled="loading">
           {{ loading ? 'กำลังส่ง...' : 'ส่งลิงก์รีเซ็ต' }}
         </button>
       </template>
 
-      <p v-else class="mt-4 rounded bg-green-50 px-3 py-2 text-sm text-green-700" role="status">
+      <p v-else class="mt-6 rounded-2xl bg-accent-soft px-4 py-3 text-sm text-ink" role="status">
         ถ้าอีเมลนี้มีอยู่ในระบบ เราได้ส่งลิงก์รีเซ็ตรหัสผ่านไปแล้ว กรุณาตรวจกล่องจดหมาย
       </p>
 
-      <p class="mt-4 text-sm"><RouterLink to="/login" class="text-accent">กลับไปเข้าสู่ระบบ</RouterLink></p>
+      <p class="mt-5 text-center text-sm">
+        <RouterLink to="/login" class="font-medium text-accent hover:underline">กลับไปเข้าสู่ระบบ</RouterLink>
+      </p>
     </form>
-  </main>
+  </AuthLayout>
 </template>
