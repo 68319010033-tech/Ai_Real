@@ -1,7 +1,16 @@
 <script setup>
-import HelloWorld from './components/HelloWorld.vue'
+const links = [
+  { to: '/timetable', label: 'ตารางสอน' },
+  { to: '/import', label: 'นำเข้าข้อมูล' },
+]
 </script>
 
 <template>
-  <HelloWorld />
+  <header class="topbar">
+    <strong>AI Timetable</strong>
+    <nav>
+      <RouterLink v-for="l in links" :key="l.to" :to="l.to">{{ l.label }}</RouterLink>
+    </nav>
+  </header>
+  <main class="page"><RouterView /></main>
 </template>
