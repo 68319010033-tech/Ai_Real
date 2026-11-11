@@ -8,7 +8,10 @@ import ConstraintPicker from '../components/ConstraintPicker.vue'
 
 const router = useRouter()
 const wizard = useWizardStore()
-const datasetVersion = ref(wizard.importResult?.datasetVersion ?? '')
+const datasetVersion = computed({
+    get: () => wizard.datasetVersion ?? '',
+    set: (v) => wizard.setDatasetVersion(v),
+})
 const timeLimitSeconds = ref(30)
 const seed = ref(1)
 const specialRules = ref([])
