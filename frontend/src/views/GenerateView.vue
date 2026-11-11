@@ -4,12 +4,14 @@ import { startSolve, getJob, cancelJob, errorMessage } from '../api'
 import { useRouter } from 'vue-router'
 import { useWizardStore } from '../stores/wizard'
 import StepNav from '../components/StepNav.vue'
+import ConstraintPicker from '../components/ConstraintPicker.vue'
 
 const router = useRouter()
 const wizard = useWizardStore()
 const datasetVersion = ref(wizard.importResult?.datasetVersion ?? '')
 const timeLimitSeconds = ref(30)
 const seed = ref(1)
+const specialRules = ref([])
 
 const job = ref(null) // { jobId, status, solverStatus }
 const error = ref('')
@@ -52,6 +54,7 @@ async function start() {
             datasetVersion: datasetVersion.value,
             timeLimitSeconds: Number(timeLimitSeconds.value),
             seed: Number(seed.value),
+            specialRules: specialRules.value,
         })
         job.value = { jobId, status: 'queued', solverStatus: null }
         startedAt.value = Date.now()
@@ -94,7 +97,7 @@ onBeforeUnmount(stop)
         </div>
         <p v-if="error" class="mt-3 text-red-700" role="alert">{{ error }}</p>
     </section>
-
+    <ConstraintPicker v-model="specialRules" :disabled="running" />
     <section v-if="job" class="rounded-md border border-slate-200 bg-white p-4">
         <p>สถานะงาน: <strong>{{ STATUS_TEXT[job.status] ?? job.status }}</strong></p>
         <p v-if="running" class="text-slate-600">เวลาที่ผ่านไป: {{ elapsed.toFixed(0) }} วินาที</p>
@@ -106,7 +109,8 @@ onBeforeUnmount(stop)
                 (ไม่ได้แปลว่าเป็นไปไม่ได้)</p>
             <p v-if="job.solverStatus === 'INFEASIBLE'" class="text-red-700">solver
                 พิสูจน์แล้วว่าไม่มีตารางที่ตรงเงื่อนไขทั้งหมด</p>
-              <StepNav back="/review" next-label="ดูตาราง" :next-disabled="!wizard.scheduleId" @next="router.push('/timetable')" />
+            <StepNav back="/review" next-label="ดูตาราง" :next-disabled="!wizard.scheduleId"
+                @next="router.push('/timetable')" />
         </template>
     </section>
 </template>

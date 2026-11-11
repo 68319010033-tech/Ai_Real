@@ -36,3 +36,6 @@ export async function exportSchedule(format, scheduleId) {
   const r = await http.get(`/api/schedules/${scheduleId}/export`, { params: { format }, responseType: 'blob' })
   return r.data
 }
+export function getValidation(scheduleId) {
+  return USE_MOCK ? mockApi.getValidation() : http.post(`/api/schedules/${scheduleId}/validate`).then((r) => r.data)
+}

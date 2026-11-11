@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useScheduleStore } from '../stores/schedule'
 import { useWizardStore } from '../stores/wizard'
 import StepNav from '../components/StepNav.vue'
+import ValidationPanel from '../components/ValidationPanel.vue'
 
 const store = useScheduleStore()
 const wizard = useWizardStore()
@@ -94,6 +95,7 @@ const cells = computed(() => {
         </tbody>
       </table>
     </div>
+        <ValidationPanel :schedule-id="store.schedule.scheduleId" class="mt-8" />
       <StepNav back="/generate" next-label="ส่งออกไฟล์" :next-disabled="!store.schedule" @next="$router.push('/export')" />
   </template>
 </template>

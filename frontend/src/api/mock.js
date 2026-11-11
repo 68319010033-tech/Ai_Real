@@ -17,6 +17,22 @@ export const mockEvents = [
 
 const jobs = {}
 
+const BASE_RULES = [
+  ['C01', 'จำนวนคาบรายวิชา = ทฤษฎี + ปฏิบัติ'],
+  ['C02', 'ไม่มีเรียนคาบ 5'],
+  ['C03', 'วิชาที่เรียนตรงกับที่ลงทะเบียน'],
+  ['C04', 'คาบรวมเท่ากับผลรวมวิชาลงทะเบียน'],
+  ['C05', 'เรียนไม่เกิน 10 คาบต่อวัน'],
+  ['C06', 'ครูไม่สอนชนเวลา'],
+  ['C07', 'ห้องไม่ถูกใช้ซ้อนเวลา'],
+  ['C08', 'ครูสอนเฉพาะวิชาที่กำหนด'],
+  ['C09', 'ประเภทห้องตรงกับวิชา'],
+  ['C10', 'Leader ไม่สอนช่วงประชุมอังคารคาบ 8'],
+  ['C11', 'มีโฮมรูมอย่างน้อยสัปดาห์ละ 1 คาบ'],
+  ['C12', 'วิชากิจกรรมอยู่พุธคาบ 8–9'],
+  ['C13', 'วิชา 20000/30000 เรียนร่วม 2 กลุ่ม'],
+]
+
 export const mockApi = {
   getSchedule: () => delay({ scheduleId: 'demo', datasetVersion: 'demo', solverStatus: 'FEASIBLE', timeslots: mockTimeslots, events: mockEvents }),
   importDataset: (files) =>
@@ -41,6 +57,19 @@ export const mockApi = {
     if (elapsed < 5) return delay({ jobId, status: 'running', solverStatus: null }, 100)
     return delay({ jobId, status: 'completed', solverStatus: 'FEASIBLE', scheduleId: 'demo' }, 100)
   },
+  getValidation: () =>
+    delay({
+      scheduleId: 'demo',
+      // ข้อมูลจำลองเพื่อดู UI เท่านั้น
+      results: BASE_RULES.map(([ruleId, title]) => {
+        if (ruleId === 'C05')
+          return { ruleId, title, status: 'fail', violations: [{ message: '(ตัวอย่างจำลอง) มี 11 คาบในวันจันทร์', groupIds: ['G1'], timeslotId: '1' }] }
+        if (ruleId === 'C11') return { ruleId, title, status: 'unresolved', violations: [] }
+        return { ruleId, title, status: 'pass', violations: [] }
+      }),
+    }, 500),
+
+
   cancelJob: (jobId) => {
     jobs[jobId].cancelled = true
     return delay({ jobId }, 100)
