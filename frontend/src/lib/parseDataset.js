@@ -76,6 +76,18 @@ const isNat = (s) => /^\d+(\.0+)?$/.test(s.trim())
 
 
 // สร้างไฟล์ CSV 7 ตารางจากข้อมูลที่แก้แล้ว (ไม่ใส่คอลัมน์ _row)
+export function serializeTables(tables) {
+    const out = {}
+    for (const [name, table] of Object.entries(tables || {})) {
+        out[name] = (table.rows || []).map((row) => {
+            const copy = { ...row }
+            delete copy._row
+            return copy
+        })
+    }
+    return out
+}
+
 export function buildCsvFiles(tables) {
     return Object.keys(TABLES)
         .filter((name) => tables[name])

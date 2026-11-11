@@ -14,7 +14,7 @@ const STATUS = {
   unresolved: { text: 'รอตัดสินใจนโยบาย', cls: 'bg-amber-100 text-amber-800' },
   inactive: { text: 'ไม่ได้เปิดใช้', cls: 'bg-slate-100 text-slate-600' },
 }
-const count = (s) => data.value.results.filter((r) => r.status === s).length
+const count = (s) => (data.value?.results ?? []).filter((r) => r.status === s).length
 
 async function load() {
   loading.value = true

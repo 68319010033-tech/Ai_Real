@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { getSchedule, errorMessage } from '../api'
+import { useWizardStore } from './wizard'
 
 export const useScheduleStore = defineStore('schedule', {
   state: () => ({ schedule: null, loading: false, error: '' }),
@@ -8,7 +9,9 @@ export const useScheduleStore = defineStore('schedule', {
       this.loading = true
       this.error = ''
       try {
-        this.schedule = await getSchedule()
+        const wizard = useWizardStore()
+        this.schedule = await getSchedule(wizard.scheduleId || 'latest')
+        if (!this.schedule?.events?.length) this.error = 'ยังไม่มีตารางจากข้อมูลที่อัปโหลด'
       } catch (e) {
         this.error = errorMessage(e)
       } finally {

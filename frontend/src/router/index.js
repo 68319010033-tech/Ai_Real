@@ -24,7 +24,7 @@ const router = createRouter({
 
 // กันข้ามขั้น (ตั้ง VITE_SKIP_GUARD=true ใน .env เพื่อข้ามตอนพัฒนา)
 router.beforeEach((to) => {
-  if (import.meta.env.VITE_SKIP_GUARD === 'true') return true
+  if (import.meta.env.DEV && import.meta.env.VITE_SKIP_GUARD === 'true') return true
   const wizard = useWizardStore()
   const step = STEPS.find((s) => s.path === to.path)
   if (step && !wizard.isUnlocked(step.n)) {
@@ -33,11 +33,7 @@ router.beforeEach((to) => {
   return true
 })
 
-
-
 router.beforeEach((to) => {
-  // โหมดจำลองไม่บังคับ login จะได้ทดสอบหน้าอื่นได้
-  if (import.meta.env.VITE_USE_MOCK === 'true') return true
   const auth = useAuthStore()
   if (!to.meta.public && !auth.isLoggedIn) return { path: '/login', query: { redirect: to.fullPath } }
   if (to.meta.public && auth.isLoggedIn) return '/upload'

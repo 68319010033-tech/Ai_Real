@@ -6,6 +6,10 @@
 .env.*.local
 *.env
 
+# Local auth store
+backend/data/users.json
+!backend/data/.gitkeep
+
 # Firebase Keys & Service Accounts
 serviceAccountKey.json
 *-firebase-adminsdk-*.json

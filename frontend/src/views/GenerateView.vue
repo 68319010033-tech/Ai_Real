@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { startSolve, getJob, cancelJob, errorMessage } from '../api'
+import { serializeTables } from '../lib/parseDataset'
 import { useRouter } from 'vue-router'
 import { useWizardStore } from '../stores/wizard'
 import StepNav from '../components/StepNav.vue'
@@ -38,6 +39,10 @@ async function tick() {
         job.value = j
         if (TERMINAL.includes(j.status)) {
             stop()
+            if (j.status === 'failed') error.value = j.error || 'จัดตารางไม่สำเร็จ'
+            if (j.status === 'completed' && j.solverStatus === 'INFEASIBLE') {
+                error.value = j.error || 'ไม่พบตารางที่ตรงเงื่อนไขทั้งหมด'
+            }
             if (j.status === 'completed' && j.scheduleId && ['OPTIMAL', 'FEASIBLE'].includes(j.solverStatus)) {
                 wizard.setSchedule(j.scheduleId)
             }
@@ -54,10 +59,11 @@ async function start() {
     elapsed.value = 0
     try {
         const { jobId } = await startSolve({
-            datasetVersion: datasetVersion.value,
+            datasetVersion: datasetVersion.value || 'local',
             timeLimitSeconds: Number(timeLimitSeconds.value),
             seed: Number(seed.value),
             specialRules: specialRules.value,
+            tables: serializeTables(wizard.tables),
         })
         job.value = { jobId, status: 'queued', solverStatus: null }
         startedAt.value = Date.now()
@@ -94,7 +100,7 @@ onBeforeUnmount(stop)
                 <input v-model="seed" type="number" :disabled="running"
                     class="w-24 rounded border border-slate-300 px-2 py-1" />
             </label>
-            <button v-if="!running" :disabled="!datasetVersion" @click="start"
+            <button v-if="!running" :disabled="!wizard.importResult" @click="start"
                 class="rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-50">เริ่มจัดตาราง</button>
             <button v-else @click="cancel" class="rounded bg-red-700 px-4 py-2 text-white">ยกเลิก</button>
         </div>
@@ -104,6 +110,7 @@ onBeforeUnmount(stop)
     <section v-if="job" class="rounded-md border border-slate-200 bg-white p-4">
         <p>สถานะงาน: <strong>{{ STATUS_TEXT[job.status] ?? job.status }}</strong></p>
         <p v-if="running" class="text-slate-600">เวลาที่ผ่านไป: {{ elapsed.toFixed(0) }} วินาที</p>
+        <p v-if="job.status === 'failed'" class="text-red-700">{{ job.error || error || 'จัดตารางไม่สำเร็จ' }}</p>
         <template v-if="job.status === 'completed'">
             <p>ผลจาก solver: <strong>{{ job.solverStatus }}</strong></p>
             <p v-if="job.solverStatus === 'FEASIBLE'" class="text-slate-600">พบตารางที่ใช้ได้
@@ -112,6 +119,7 @@ onBeforeUnmount(stop)
                 (ไม่ได้แปลว่าเป็นไปไม่ได้)</p>
             <p v-if="job.solverStatus === 'INFEASIBLE'" class="text-red-700">solver
                 พิสูจน์แล้วว่าไม่มีตารางที่ตรงเงื่อนไขทั้งหมด</p>
+            <p v-if="job.error" class="text-red-700">{{ job.error }}</p>
             <StepNav back="/review" next-label="ดูตาราง" :next-disabled="!wizard.scheduleId"
                 @next="router.push('/timetable')" />
         </template>

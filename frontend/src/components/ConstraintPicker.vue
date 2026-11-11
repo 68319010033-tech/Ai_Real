@@ -4,9 +4,6 @@ defineProps({ disabled: Boolean })
 
 import { ref } from 'vue'
 
-const MAX = 2 // วันแข่งสุ่มจับ 2 เงื่อนไข
-const limitMode = ref(true) // โหมดแข่งขัน: จำกัดไม่เกิน MAX ข้อ
-
 // เงื่อนไขพื้นฐาน (ไฟล์ 03) เปิดเสมอ แสดงอย่างเดียว
 const BASE = [
     { id: 'C01', text: 'จำนวนคาบรายวิชา = theory + practice' },
@@ -36,14 +33,9 @@ const RULES = [
     { id: 'C23', kind: 'soft', text: 'ควรเริ่มเรียนคาบ 1 หรือ 2 ในวันที่มีเรียน' },
 ]
 
-const isFull = () => limitMode.value && model.value.length >= MAX
-function onLimitChange() {
-    // เปิดโหมดจำกัดตอนเลือกเกิน MAX อยู่: ตัดเหลือ MAX ข้อแรก
-    if (limitMode.value && model.value.length > MAX) model.value = model.value.slice(0, MAX)
-}
 function toggle(id) {
     if (model.value.includes(id)) model.value = model.value.filter((x) => x !== id)
-    else if (!isFull()) model.value = [...model.value, id]
+    else model.value = [...model.value, id]
 }
 </script>
 
@@ -59,22 +51,17 @@ function toggle(id) {
         </details>
 
         <h3 class="mt-4 font-semibold">เงื่อนไขพิเศษ (C14–C23 ไม่มี C21)</h3>
-        <label class="mt-2 flex cursor-pointer items-center gap-2 text-sm">
-            <input type="checkbox" class="size-4 accent-accent" v-model="limitMode" :disabled="disabled"
-                @change="onLimitChange" />
-            โหมดแข่งขัน: จำกัดไม่เกิน {{ MAX }} ข้อ (กรรมการสุ่มจับ {{ MAX }} เงื่อนไข)
-        </label>
         <p class="mt-1 text-sm text-muted">
-            เลือกแล้ว {{ model.length }}<template v-if="limitMode">/{{ MAX }}</template> ·
+            เลือกเงื่อนไขที่ต้องการให้ AI ตรวจได้ทั้งหมด ·
             ประเภท hard/soft เป็นข้อเสนอของทีม ยังไม่ผ่านการยืนยันจากกรรมการ
         </p>
 
         <ul class="mt-3 divide-y divide-line">
             <li v-for="r in RULES" :key="r.id">
                 <label class="flex cursor-pointer items-start gap-3 py-2"
-                    :class="{ 'opacity-50': disabled || (isFull() && !model.includes(r.id)) }">
+                    :class="{ 'opacity-50': disabled }">
                     <input type="checkbox" class="mt-1 size-4 accent-accent" :checked="model.includes(r.id)"
-                        :disabled="disabled || (isFull() && !model.includes(r.id))" @change="toggle(r.id)" />
+                        :disabled="disabled" @change="toggle(r.id)" />
                     <span class="flex-1">
                         <span class="font-medium">{{ r.id }}</span> {{ r.text }}
                         <span v-if="r.note" class="block text-xs text-muted">{{ r.note }}</span>

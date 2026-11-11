@@ -19,9 +19,16 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
 
 // 2. อ่านจากไฟล์ serviceAccountKey.json ในเครื่อง Local
 if (!serviceAccount || !serviceAccount.private_key) {
-  const localKeyPath = path.join(__dirname, '../../../serviceAccountKey.json'); // ชี้ไปที่ root Ai_Real/serviceAccountKey.json
-  if (fs.existsSync(localKeyPath)) {
-    serviceAccount = require(localKeyPath);
+  const candidates = [
+    process.env.FIREBASE_KEY_PATH,
+    path.join(process.cwd(), 'serviceAccountKey.json'),
+    path.join(__dirname, '../../../serviceAccountKey.json'),
+  ].filter(Boolean);
+  for (const localKeyPath of candidates) {
+    if (fs.existsSync(localKeyPath)) {
+      serviceAccount = require(localKeyPath);
+      break;
+    }
   }
 }
 
@@ -34,16 +41,21 @@ if (serviceAccount && serviceAccount.private_key) {
 // 3. Initialize Firebase
 if (!getApps().length) {
   if (serviceAccount && serviceAccount.private_key) {
-    initializeApp({
-      credential: cert(serviceAccount),
-      databaseURL: process.env.FIREBASE_DATABASE_URL
-    });
-    console.log("✅ Firebase Admin initialized successfully!");
+    try {
+      initializeApp({
+        credential: cert(serviceAccount),
+        databaseURL: process.env.FIREBASE_DATABASE_URL
+      });
+      console.log("✅ Firebase Admin initialized successfully!");
+    } catch (err) {
+      console.error("❌ Firebase Admin failed to initialize:", err.message);
+    }
   } else {
     console.error("❌ Firebase Service Account is missing or invalid.");
   }
 }
 
-const db = getApps().length ? getDatabase() : null;
+const isFirebaseReady = getApps().length > 0;
+const db = isFirebaseReady ? getDatabase() : null;
 
-module.exports = { admin, db };
+module.exports = { admin, db, isFirebaseReady };

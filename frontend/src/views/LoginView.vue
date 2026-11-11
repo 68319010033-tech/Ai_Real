@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter, useRoute, RouterLink } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { errorMessage } from '../api'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -21,7 +22,7 @@ async function submit() {
     await auth.login(email.value, password.value)
     router.push(typeof route.query.redirect === 'string' ? route.query.redirect : '/upload')
   } catch (e) {
-    error.value = 'อีเมลหรือรหัสผ่านไม่ถูกต้อง'
+    error.value = errorMessage(e) || 'อีเมลหรือรหัสผ่านไม่ถูกต้อง'
   } finally {
     loading.value = false
   }

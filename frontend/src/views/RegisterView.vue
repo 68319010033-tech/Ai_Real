@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useRouter, RouterLink } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { errorMessage } from '../api'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -22,7 +23,7 @@ async function submit() {
     await auth.register(email.value, password.value)
     router.push('/upload')
   } catch (e) {
-    error.value = 'สมัครสมาชิกไม่สำเร็จ ลองใหม่อีกครั้ง'
+    error.value = errorMessage(e) || 'สมัครสมาชิกไม่สำเร็จ ลองใหม่อีกครั้ง'
   } finally {
     loading.value = false
   }

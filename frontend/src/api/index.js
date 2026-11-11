@@ -1,8 +1,20 @@
 import axios from 'axios'
 import { mockApi } from './mock'
 
-const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
+const USE_MOCK = import.meta.env.DEV && import.meta.env.VITE_USE_MOCK === 'true'
+const AUTH_KEY = 'auth-user'
 const http = axios.create({ baseURL: import.meta.env.VITE_API_BASE_URL ?? '' })
+
+http.interceptors.request.use((config) => {
+  try {
+    const raw = sessionStorage.getItem(AUTH_KEY)
+    const user = raw ? JSON.parse(raw) : null
+    if (user?.token) config.headers.Authorization = `Bearer ${user.token}`
+  } catch {
+    /* ignore */
+  }
+  return config
+})
 
 function callWithFallback(method, candidates, config = {}) {
   const attempts = [...candidates]
@@ -14,19 +26,27 @@ function callWithFallback(method, candidates, config = {}) {
   })
 }
 
-// Backend ปัจจุบันมี route /api/schedule และ /api/auth
-// ให้รองรับ route แบบเก่า/ใหม่ เพื่อไม่พังเวลา backend ยังไม่ sync
+export function loginRequest(email, password) {
+  return http.post('/api/auth/login', { email, password }).then((r) => r.data)
+}
+
+export function registerRequest(email, password, displayName) {
+  return http.post('/api/auth/register', { email, password, displayName }).then((r) => r.data)
+}
+
+export function forgotPasswordRequest(email) {
+  return http.post('/api/auth/forgot-password', { email }).then((r) => r.data)
+}
+
 export function getSchedule(id = 'latest') {
   if (USE_MOCK) return mockApi.getSchedule()
 
   return callWithFallback(
     (url) => http.get(url).then((r) => r.data),
-    [`/api/schedule/${id}`, `/api/schedules/${id}`],
+    [`/api/schedule/schedules/${id}`, `/api/schedules/${id}`, `/api/schedule/${id}`],
   )
 }
 
-// frontend สร้าง CSV 7 ไฟล์จากตารางที่ user แก้แล้ว
-// backend ปัจจุบันยังไม่มี /api/datasets/import ให้ปล่อยให้ชัดเจนว่าควรติดตาม route ใหม่
 export function importDataset(files) {
   if (USE_MOCK) return mockApi.importDataset(files)
 
@@ -35,7 +55,7 @@ export function importDataset(files) {
 
   return callWithFallback(
     (url) => http.post(url, form).then((r) => r.data),
-    ['/api/datasets/import', '/api/schedule/import'],
+    ['/api/schedule/datasets/import', '/api/datasets/import', '/api/schedule/import'],
   ).catch((error) => {
     if (error?.response?.status === 404) {
       throw new Error('Backend ยังไม่ได้ implement /api/datasets/import หรือ /api/schedule/import')
@@ -49,7 +69,7 @@ export function startSolve(body) {
 
   return callWithFallback(
     (url) => http.post(url, body).then((r) => r.data),
-    ['/api/solve-jobs', '/api/schedule/generate'],
+    ['/api/schedule/solve-jobs', '/api/solve-jobs', '/api/schedule/generate'],
   ).catch((error) => {
     if (error?.response?.status === 404) {
       throw new Error('Backend ยังไม่ได้ implement solve job endpoint')
@@ -63,7 +83,7 @@ export function getJob(jobId) {
 
   return callWithFallback(
     (url) => http.get(url).then((r) => r.data),
-    [`/api/solve-jobs/${jobId}`, `/api/schedule/jobs/${jobId}`],
+    [`/api/schedule/solve-jobs/${jobId}`, `/api/solve-jobs/${jobId}`, `/api/schedule/jobs/${jobId}`],
   )
 }
 
@@ -72,7 +92,7 @@ export function cancelJob(jobId) {
 
   return callWithFallback(
     (url) => http.post(url).then((r) => r.data),
-    [`/api/solve-jobs/${jobId}/cancel`, `/api/schedule/jobs/${jobId}/cancel`],
+    [`/api/schedule/solve-jobs/${jobId}/cancel`, `/api/solve-jobs/${jobId}/cancel`, `/api/schedule/jobs/${jobId}/cancel`],
   )
 }
 
@@ -85,8 +105,14 @@ export async function exportSchedule(format, scheduleId) {
 
   const r = await callWithFallback(
     (url) => http.get(url, { params: { format }, responseType: 'blob' }),
-    [`/api/schedules/${scheduleId}/export`, `/api/schedule/${scheduleId}/export`],
+    [`/api/schedule/schedules/${scheduleId}/export`, `/api/schedules/${scheduleId}/export`, `/api/schedule/${scheduleId}/export`],
   )
+  const type = r.headers?.['content-type'] || ''
+  if (type.includes('application/json')) {
+    const text = await r.data.text()
+    const json = JSON.parse(text)
+    throw new Error(json.error || json.message || 'ส่งออกไฟล์ไม่สำเร็จ')
+  }
   return r.data
 }
 
@@ -95,6 +121,6 @@ export function getValidation(scheduleId) {
 
   return callWithFallback(
     (url) => http.post(url).then((r) => r.data),
-    [`/api/schedules/${scheduleId}/validate`, `/api/schedule/${scheduleId}/validate`],
+    [`/api/schedule/schedules/${scheduleId}/validate`, `/api/schedules/${scheduleId}/validate`, `/api/schedule/${scheduleId}/validate`],
   )
 }
