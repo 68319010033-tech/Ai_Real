@@ -9,6 +9,7 @@ export function getSchedule(id = 'latest') {
   return USE_MOCK ? mockApi.getSchedule() : http.get(`/api/schedules/${id}`).then((r) => r.data)
 }
 
+// files = ไฟล์ CSV ที่สร้างจากข้อมูลที่ผู้ใช้ตรวจ/แก้แล้ว (buildCsvFiles)
 export function importDataset(files) {
   if (USE_MOCK) return mockApi.importDataset(files)
   const form = new FormData()
