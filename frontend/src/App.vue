@@ -2,6 +2,7 @@
 const links = [
   { to: '/timetable', label: 'ตารางสอน' },
   { to: '/import', label: 'นำเข้าข้อมูล' },
+  { to: '/generate', label: 'จัดตาราง' },
 ]
 </script>
 

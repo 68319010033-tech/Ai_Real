@@ -16,6 +16,18 @@ export function importDataset(files) {
   return http.post('/api/datasets/import', form).then((r) => r.data)
 }
 
+export function startSolve(body) {
+  return USE_MOCK ? mockApi.startSolve(body) : http.post('/api/solve-jobs', body).then((r) => r.data)
+}
+
+export function getJob(jobId) {
+  return USE_MOCK ? mockApi.getJob(jobId) : http.get(`/api/solve-jobs/${jobId}`).then((r) => r.data)
+}
+
+export function cancelJob(jobId) {
+  return USE_MOCK ? mockApi.cancelJob(jobId) : http.post(`/api/solve-jobs/${jobId}/cancel`).then((r) => r.data)
+}
+
 export function errorMessage(e) {
   return e?.response?.data?.message ?? e?.message ?? 'เกิดข้อผิดพลาด'
 }

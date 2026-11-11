@@ -15,6 +15,8 @@ export const mockEvents = [
   { eventId: 'e4', groupIds: ['G1'], subjectId: 'ACT-DEMO', subjectName: 'กิจกรรม (ตัวอย่าง)', teacherId: 'T03', roomId: 'R0003', timeslotId: '32', component: 'theory' },
 ]
 
+const jobs = {}
+
 export const mockApi = {
   getSchedule: () => delay({ scheduleId: 'demo', datasetVersion: 'demo', solverStatus: 'FEASIBLE', timeslots: mockTimeslots, events: mockEvents }),
   importDataset: (files) =>
@@ -25,4 +27,22 @@ export const mockApi = {
         { code: 'SCHEMA_INVALID', file: files[0]?.name ?? 'room.csv', sheet: null, row: 5, column: 'room_id', message: 'ค่าเป็น placeholder (ตัวอย่างจำลอง)' },
       ],
     }, 800),
+
+      startSolve: () => {
+    const jobId = 'job-' + Date.now()
+    jobs[jobId] = { startedAt: Date.now(), cancelled: false }
+    return delay({ jobId }, 200)
+  },
+  getJob: (jobId) => {
+    const j = jobs[jobId]
+    const elapsed = (Date.now() - j.startedAt) / 1000
+    if (j.cancelled) return delay({ jobId, status: 'cancelled', solverStatus: null })
+    if (elapsed < 1) return delay({ jobId, status: 'queued', solverStatus: null }, 100)
+    if (elapsed < 5) return delay({ jobId, status: 'running', solverStatus: null }, 100)
+    return delay({ jobId, status: 'completed', solverStatus: 'FEASIBLE', scheduleId: 'demo' }, 100)
+  },
+  cancelJob: (jobId) => {
+    jobs[jobId].cancelled = true
+    return delay({ jobId }, 100)
+  },
 }
