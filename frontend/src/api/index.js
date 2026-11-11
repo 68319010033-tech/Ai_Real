@@ -31,3 +31,8 @@ export function cancelJob(jobId) {
 export function errorMessage(e) {
   return e?.response?.data?.message ?? e?.message ?? 'เกิดข้อผิดพลาด'
 }
+export async function exportSchedule(format, scheduleId) {
+  if (USE_MOCK) return mockApi.exportSchedule(format)
+  const r = await http.get(`/api/schedules/${scheduleId}/export`, { params: { format }, responseType: 'blob' })
+  return r.data
+}

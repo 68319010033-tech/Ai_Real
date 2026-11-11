@@ -24,11 +24,11 @@ export const mockApi = {
       datasetVersion: 'demo-1',
       counts: { teacher: 18, room: 22, student_group: 8, subject: 41, teach: 50, register: 65, timeslot: 60 },
       errors: [
-        { code: 'SCHEMA_INVALID', file: files[0]?.name ?? 'room.csv', sheet: null, row: 5, column: 'room_id', message: 'ค่าเป็น placeholder (ตัวอย่างจำลอง)' },
+        { code: 'SCHEMA_INVALID', severity: 'warning', file: files[0]?.name ?? 'room.csv', sheet: null, row: 5, column: 'room_id', message: 'ค่าเป็น placeholder (ตัวอย่างจำลอง)' },
       ],
     }, 800),
 
-      startSolve: () => {
+  startSolve: () => {
     const jobId = 'job-' + Date.now()
     jobs[jobId] = { startedAt: Date.now(), cancelled: false }
     return delay({ jobId }, 200)
@@ -44,5 +44,11 @@ export const mockApi = {
   cancelJob: (jobId) => {
     jobs[jobId].cancelled = true
     return delay({ jobId }, 100)
+  },
+  exportSchedule: async (format) => {
+    if (format !== 'csv') throw new Error('โหมดจำลองรองรับเฉพาะ CSV')
+    const rows = ['group_id,timeslot_id,subject_id,teacher_id,room_id']
+    for (const e of mockEvents) for (const g of e.groupIds) rows.push([g, e.timeslotId, e.subjectId, e.teacherId, e.roomId].join(','))
+    return delay(new Blob([rows.join('\n')], { type: 'text/csv' }), 300)
   },
 }

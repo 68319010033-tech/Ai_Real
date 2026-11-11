@@ -1,9 +1,15 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useScheduleStore } from '../stores/schedule'
+import { useWizardStore } from '../stores/wizard'
+import StepNav from '../components/StepNav.vue'
 
 const store = useScheduleStore()
-onMounted(() => store.load())
+const wizard = useWizardStore()
+onMounted(async () => {
+  await store.load()
+  if (!store.error) wizard.markViewed()
+})
 
 const DAYS = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์']
 const PERIODS = Array.from({ length: 12 }, (_, i) => i + 1)
@@ -43,10 +49,10 @@ const cells = computed(() => {
 </script>
 
 <template>
-  <h1>ตารางสอน</h1>
+  <h1 class="mb-4 text-2xl font-bold">ตารางสอน</h1>
   <p v-if="store.loading" class="muted">กำลังโหลดตาราง…</p>
   <p v-else-if="store.error" class="err" role="alert">
-    {{ store.error }} <button @click="store.load()">ลองใหม่</button>
+    {{ store.error }} <button class="btn btn-ghost" @click="store.load()">ลองใหม่</button>
   </p>
   <p v-else-if="!events.length" class="muted">ยังไม่มีตาราง ไปที่ “นำเข้าข้อมูล” แล้วสั่งจัดตารางก่อน</p>
 
@@ -88,6 +94,7 @@ const cells = computed(() => {
         </tbody>
       </table>
     </div>
+      <StepNav back="/generate" next-label="ส่งออกไฟล์" :next-disabled="!store.schedule" @next="$router.push('/export')" />
   </template>
 </template>
 

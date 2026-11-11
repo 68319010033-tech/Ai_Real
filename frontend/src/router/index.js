@@ -1,14 +1,32 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import ImportView from '../views/ImportView.vue'
-import TimetableView from '../views/TimetableView.vue'
+import { STEPS, useWizardStore } from '../stores/wizard'
+import UploadView from '../views/UploadView.vue'
+import ReviewView from '../views/ReviewView.vue'
 import GenerateView from '../views/GenerateView.vue'
+import TimetableView from '../views/TimetableView.vue'
+import ExportView from '../views/ExportView.vue'
 
-export default createRouter({
+const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/timetable' },
-    { path: '/timetable', name: 'timetable', component: TimetableView },
-    { path: '/import', name: 'import', component: ImportView },
-    { path: '/generate', name: 'generate', component: GenerateView }
+    { path: '/', redirect: '/upload' },
+    { path: '/upload', component: UploadView },
+    { path: '/review', component: ReviewView },
+    { path: '/generate', component: GenerateView },
+    { path: '/timetable', component: TimetableView },
+    { path: '/export', component: ExportView },
   ],
 })
+
+// กันข้ามขั้น (ตั้ง VITE_SKIP_GUARD=true ใน .env เพื่อข้ามตอนพัฒนา)
+router.beforeEach((to) => {
+  if (import.meta.env.VITE_SKIP_GUARD === 'true') return true
+  const wizard = useWizardStore()
+  const step = STEPS.find((s) => s.path === to.path)
+  if (step && !wizard.isUnlocked(step.n)) {
+    return STEPS.find((s) => !wizard.isDone(s.n))?.path ?? '/upload'
+  }
+  return true
+})
+
+export default router
