@@ -1,9 +1,17 @@
 <script setup>
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { STEPS, useWizardStore } from '../stores/wizard'
+import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
+const router = useRouter()
 const wizard = useWizardStore()
+const auth = useAuthStore()
+
+function logout() {
+  auth.logout()
+  router.push('/login')
+}
 
 function state(s) {
   if (route.path === s.path) return 'current'
@@ -50,6 +58,17 @@ function state(s) {
           </span>
         </component>
       </li>
-    </ol>
+      </ol>
+
+    <div class="mt-auto border-t border-white/10 pt-4">
+      <p v-if="auth.user" class="mb-2 truncate text-xs text-white/60">{{ auth.user.email }}</p>
+      <button
+        type="button"
+        class="w-full rounded border border-white/20 px-3 py-2 text-sm text-white hover:bg-white/10"
+        @click="logout"
+      >
+        ออกจากระบบ
+      </button>
+    </div>
   </aside>
 </template>

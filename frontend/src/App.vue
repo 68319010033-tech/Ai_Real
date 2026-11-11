@@ -22,7 +22,7 @@ function logout() {
   <div v-else class="min-h-screen lg:flex">
     <StepSidebar class="hidden lg:flex" />
     <div class="min-w-0 flex-1">
-      <div class="flex justify-end border-b border-line bg-white px-4 py-2 text-sm">
+            <div class="flex justify-end border-b border-line bg-white px-4 py-2 text-sm lg:hidden">  
         <span v-if="auth.user" class="mr-3 text-muted">{{ auth.user.email }}</span>
         <button type="button" class="text-accent" @click="logout">ออกจากระบบ</button>
       </div>
