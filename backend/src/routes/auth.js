@@ -92,6 +92,10 @@ router.post('/forgot-password', otpLimiter, async (req, res) => {
       await sendOTPEmail(user.email, otpCode);
     } catch (error) {
       console.warn('OTP email skipped:', error.message);
+      return res.status(502).json({
+        error: 'ส่ง OTP ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง หรือตรวจ Brevo configuration',
+        detail: error.message,
+      });
     }
   }
 
