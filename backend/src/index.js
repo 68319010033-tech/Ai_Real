@@ -10,9 +10,11 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Routes
-app.use('/api', scheduleRoutes);
+// Public auth routes first
 app.use('/api/auth', authRoutes);
+
+// Protected schedule routes next
+app.use('/api', scheduleRoutes);
 app.use('/api/schedule', scheduleRoutes);
 
 app.get('/health', (req, res) => {

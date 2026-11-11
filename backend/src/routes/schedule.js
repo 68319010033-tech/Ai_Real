@@ -83,9 +83,7 @@ function getStoredSchedule(id) {
   return null;
 }
 
-router.use(verifyToken);
-
-router.post('/datasets/import', upload.array('files', 20), async (req, res) => {
+router.post('/datasets/import', verifyToken, upload.array('files', 20), async (req, res) => {
   const files = Array.isArray(req.files) ? req.files : [];
   const tables = tablesFromFiles(files);
   const errors = datasetErrors(tables);
@@ -107,7 +105,7 @@ router.post('/datasets/import', upload.array('files', 20), async (req, res) => {
   return res.json({ datasetVersion, counts: countTables(tables), errors });
 });
 
-router.post('/solve-jobs', async (req, res) => {
+router.post('/solve-jobs', verifyToken, async (req, res) => {
   const body = req.body || {};
   const jobId = makeJobId();
   const tables = body.tables && typeof body.tables === 'object'
@@ -204,7 +202,7 @@ router.post('/solve-jobs', async (req, res) => {
   });
 });
 
-router.get('/solve-jobs/:jobId', async (req, res) => {
+router.get('/solve-jobs/:jobId', verifyToken, async (req, res) => {
   const { jobId } = req.params;
   const job = memory.jobs.get(jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -218,7 +216,7 @@ router.get('/solve-jobs/:jobId', async (req, res) => {
   });
 });
 
-router.post('/solve-jobs/:jobId/cancel', async (req, res) => {
+router.post('/solve-jobs/:jobId/cancel', verifyToken, async (req, res) => {
   const { jobId } = req.params;
   const job = memory.jobs.get(jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -228,13 +226,13 @@ router.post('/solve-jobs/:jobId/cancel', async (req, res) => {
   return res.json({ jobId, status: 'cancelled' });
 });
 
-router.get('/schedules/:id', async (req, res) => {
+router.get('/schedules/:id', verifyToken, async (req, res) => {
   const schedule = getStoredSchedule(req.params.id);
   if (!schedule) return res.status(404).json({ error: 'ยังไม่มีตาราง หรือรหัสตารางไม่ถูกต้อง' });
   return res.json(schedule);
 });
 
-router.get('/schedules/:id/export', async (req, res) => {
+router.get('/schedules/:id/export', verifyToken, async (req, res) => {
   const { id } = req.params;
   const format = (req.query.format || 'csv').toLowerCase();
   const schedule = getStoredSchedule(id);
@@ -255,7 +253,7 @@ router.get('/schedules/:id/export', async (req, res) => {
   return res.status(501).json({ error: `ยังไม่รองรับไฟล์ ${format.toUpperCase()} ใช้ CSV ก่อน` });
 });
 
-router.post('/schedules/:id/validate', async (req, res) => {
+router.post('/schedules/:id/validate', verifyToken, async (req, res) => {
   const schedule = getStoredSchedule(req.params.id);
   if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
   const dataset = memory.datasets.get(schedule.datasetVersion);
@@ -264,7 +262,7 @@ router.post('/schedules/:id/validate', async (req, res) => {
   return res.json(validateSchedule(schedule, tables, schedule.specialRules || []));
 });
 
-router.post('/generate', async (req, res) => {
+router.post('/generate', verifyToken, async (req, res) => {
   const body = req.body || {};
   const tables = body.tables || memory.datasets.get(body.datasetVersion)?.tables;
   if (!tables) return res.status(400).json({ error: 'ไม่พบชุดข้อมูล' });
@@ -285,7 +283,7 @@ router.post('/generate', async (req, res) => {
   }
 });
 
-router.get('/latest', async (req, res) => {
+router.get('/latest', verifyToken, async (req, res) => {
   if (memory.latest) return res.json(memory.latest);
   return res.status(404).json({ error: 'No schedule generated yet' });
 });
