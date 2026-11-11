@@ -5,6 +5,7 @@ import ReviewView from '../views/ReviewView.vue'
 import GenerateView from '../views/GenerateView.vue'
 import TimetableView from '../views/TimetableView.vue'
 import ExportView from '../views/ExportView.vue'
+import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -15,6 +16,9 @@ const router = createRouter({
     { path: '/generate', component: GenerateView },
     { path: '/timetable', component: TimetableView },
     { path: '/export', component: ExportView },
+    { path: '/login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
+    { path: '/register', component: () => import('../views/RegisterView.vue'), meta: { public: true } },
+    { path: '/forgot-password', component: () => import('../views/ForgotPasswordView.vue'), meta: { public: true } },
   ],
 })
 
@@ -26,6 +30,17 @@ router.beforeEach((to) => {
   if (step && !wizard.isUnlocked(step.n)) {
     return STEPS.find((s) => !wizard.isDone(s.n))?.path ?? '/upload'
   }
+  return true
+})
+
+
+
+router.beforeEach((to) => {
+  // โหมดจำลองไม่บังคับ login จะได้ทดสอบหน้าอื่นได้
+  if (import.meta.env.VITE_USE_MOCK === 'true') return true
+  const auth = useAuthStore()
+  if (!to.meta.public && !auth.isLoggedIn) return { path: '/login', query: { redirect: to.fullPath } }
+  if (to.meta.public && auth.isLoggedIn) return '/upload'
   return true
 })
 
