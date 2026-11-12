@@ -38,6 +38,10 @@ export function forgotPasswordRequest(email) {
   return http.post('/api/auth/forgot-password', { email }).then((r) => r.data)
 }
 
+export function resetPasswordRequest(email, otp, newPassword) {
+  return http.post('/api/auth/reset-password', { email, otp, newPassword }).then((r) => r.data)
+}
+
 export function getSchedule(id = 'latest') {
   if (USE_MOCK) return mockApi.getSchedule()
 

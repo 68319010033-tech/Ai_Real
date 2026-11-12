@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { loginRequest, registerRequest, forgotPasswordRequest } from '../api'
+import { loginRequest, registerRequest, forgotPasswordRequest, resetPasswordRequest } from '../api'
 
 const KEY = 'auth-user'
 const load = () => {
@@ -43,10 +43,14 @@ export const useAuthStore = defineStore('auth', () => {
     await forgotPasswordRequest(email)
   }
 
+  async function resetPassword(email, otp, newPassword) {
+    await resetPasswordRequest(email, otp, newPassword)
+  }
+
   function logout() {
     user.value = null
     save(null)
   }
 
-  return { user, isLoggedIn, login, register, forgotPassword, logout }
+  return { user, isLoggedIn, login, register, forgotPassword, resetPassword, logout }
 })

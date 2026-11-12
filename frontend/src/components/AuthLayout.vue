@@ -158,7 +158,7 @@ onBeforeUnmount(() => clearInterval(timer))
 
     <!-- ฝั่งขวา: ฟอร์ม -->
     <section class="flex w-full flex-1 items-center justify-center bg-canvas p-6 lg:bg-white">
-      <div class="w-full max-w-sm">
+      <div class="w-full max-w-xl">
         <slot />
       </div>
     </section>
