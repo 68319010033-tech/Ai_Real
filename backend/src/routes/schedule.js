@@ -124,12 +124,25 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
     timeLimitSeconds: Number(body.timeLimitSeconds || 30),
     seed: Number(body.seed || 1),
     specialRules: Array.isArray(body.specialRules) ? body.specialRules : [],
+    constraints: body.constraints || {
+      blockedSlots: [],
+      reservedSlots: [],
+      roomLocks: [],
+      maxPeriodsPerDay: 10,
+      roomTypeMatch: false,
+    },
     tables,
     createdAt: new Date().toISOString(),
   };
 
   memory.jobs.set(jobId, job);
-  res.json({ jobId, status: 'queued', solverStatus: 'QUEUED' });
+  res.json({
+    jobId,
+    status: 'queued',
+    solverStatus: 'QUEUED',
+    logs: [],
+    stats: { variables: 0, constraints: 0, conflicts: 0, branches: 0, wallTimeSec: 0, objective: null },
+  });
 
   setImmediate(async () => {
     const current = memory.jobs.get(jobId);
@@ -139,7 +152,7 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
     memory.jobs.set(jobId, current);
 
     try {
-      const payload = buildSolverPayload(current.tables, current.specialRules, current.timeLimitSeconds);
+      const payload = buildSolverPayload(current.tables, current.specialRules, current.timeLimitSeconds, current.constraints || {});
       const timeoutMs = Math.max(45000, (current.timeLimitSeconds + 20) * 1000);
       let result;
       try {
@@ -151,6 +164,8 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
           current.solverStatus = 'INFEASIBLE';
           current.error = detail?.detail || 'ไม่พบตารางที่ตรงเงื่อนไขทั้งหมด';
           current.completedAt = new Date().toISOString();
+          current.logs = detail?.logs || [];
+          current.stats = detail?.stats || { variables: 0, constraints: 0, conflicts: 0, branches: 0, wallTimeSec: 0, objective: null };
           memory.jobs.set(jobId, current);
           return;
         }
@@ -173,22 +188,22 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
         current.solverStatus = schedule.solverStatus;
         current.scheduleId = scheduleId;
         current.schedule = schedule;
+        current.logs = Array.isArray(result.logs) ? result.logs : [];
+        current.stats = result.stats || { variables: 0, constraints: 0, conflicts: 0, branches: 0, wallTimeSec: 0, objective: null };
         current.completedAt = new Date().toISOString();
         memory.latest = schedule;
         memory.jobs.set(jobId, current);
         if (db) {
-          try {
-            await db.ref('schedules/latest').set(schedule);
-          } catch (error) {
-            console.warn('Firebase schedule save skipped:', error.message);
-          }
+          try { await db.ref('schedules/latest').set(schedule); } catch (error) { console.warn('Firebase schedule save skipped:', error.message); }
         }
         return;
       }
 
       current.status = 'completed';
-      current.solverStatus = result.status || 'INFEASIBLE';
-      current.error = result.detail || 'ไม่พบตารางที่ตรงเงื่อนไขทั้งหมด';
+      current.solverStatus = result.solver_status || result.status || 'INFEASIBLE';
+      current.error = result.reason || result.detail || 'ไม่พบตารางที่ตรงเงื่อนไขทั้งหมด';
+      current.logs = Array.isArray(result.logs) ? result.logs : [];
+      current.stats = result.stats || { variables: 0, constraints: 0, conflicts: 0, branches: 0, wallTimeSec: 0, objective: null };
       current.completedAt = new Date().toISOString();
       memory.jobs.set(jobId, current);
     } catch (error) {
@@ -197,6 +212,8 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
       current.solverStatus = 'FAILED';
       current.error = error?.response?.data?.detail || error?.message || 'AI worker unavailable';
       current.completedAt = new Date().toISOString();
+      current.logs = [];
+      current.stats = { variables: 0, constraints: 0, conflicts: 0, branches: 0, wallTimeSec: 0, objective: null };
       memory.jobs.set(jobId, current);
     }
   });
@@ -211,6 +228,9 @@ router.get('/solve-jobs/:jobId', verifyToken, async (req, res) => {
     status: job.status,
     solverStatus: job.solverStatus,
     scheduleId: job.scheduleId || null,
+    logs: Array.isArray(job.logs) ? job.logs : [],
+    stats: job.stats || { variables: 0, constraints: 0, conflicts: 0, branches: 0, wallTimeSec: 0, objective: null },
+    infeasibleRules: job.infeasibleRules || [],
     error: job.error || null,
     datasetVersion: job.datasetVersion,
   });

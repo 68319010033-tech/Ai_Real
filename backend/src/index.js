@@ -18,7 +18,6 @@ app.use('/api/auth', authRoutes);
 
 // Protected schedule routes next
 app.use('/api', scheduleRoutes);
-app.use('/api/schedule', scheduleRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'Backend API is running' });

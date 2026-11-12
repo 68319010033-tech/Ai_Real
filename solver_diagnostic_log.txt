@@ -1,0 +1,34 @@
+Ai_Real -- solver diagnostics log
+Date: 2026-11-12
+Dataset folder: c:\Users\ACER\Downloads\cl
+Files: teacher.csv, room.csv, student_group.csv, subject.csv, teach.csv, register.csv, timeslot.csv
+Seed: 1
+Time limit: 60s
+
+VARIABLE_GENERATION_SUMMARY
+created_vars=4565
+---
+
+RESULT
+{
+  "dataset_counts": {
+    "teacher": 18,
+    "room": 22,
+    "student_group": 8,
+    "subject": 41,
+    "teach": 48,
+    "register": 65,
+    "timeslot": 60
+  },
+  "status": "INFEASIBLE",
+  "solver_status": "INFEASIBLE",
+  "runtime_seconds": 0.964,
+  "variables": 4565,
+  "reason": "base constraints conflict",
+  "debug": null
+}
+
+Interpretation:
+- Variable generation is working: 4565 candidate variables were created.
+- The issue is no longer a zero-variable bug.
+- The remaining issue is the real base-model contradiction, not a model-construction failure.

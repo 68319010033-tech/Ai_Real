@@ -1,9 +1,36 @@
 from collections import defaultdict
+from time import perf_counter
 from ortools.sat.python import cp_model
 
 
+def _as_int(value, default=0):
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _day_number(value):
+    if value is None:
+        return 0
+    s = str(value).strip()
+    if not s:
+        return 0
+    mapping = {
+        'mon': 1, 'tue': 2, 'wed': 3, 'thu': 4, 'fri': 5,
+        'monday': 1, 'tuesday': 2, 'wednesday': 3, 'thursday': 4, 'friday': 5,
+        'จันทร์': 1, 'อังคาร': 2, 'พุธ': 3, 'พฤหัสบดี': 4, 'ศุกร์': 5,
+    }
+    low = s.lower()
+    if low in mapping:
+        return mapping[low]
+    return _as_int(s, 0)
+
+
 def _hours(subject):
-    return int(subject.get("theory_hours") or 0) + int(subject.get("practice_hours") or 0)
+    theory = _as_int(subject.get("theory") if subject.get("theory") is not None else subject.get("theory_hours"), 0)
+    practice = _as_int(subject.get("practice") if subject.get("practice") is not None else subject.get("practice_hours"), 0)
+    return theory + practice
 
 
 def _is_activity(subject):
@@ -21,7 +48,72 @@ def _room_type(room):
     return str(room.get("room_type") or "").strip().lower()
 
 
+def _day_key(slot):
+    return _day_number(slot.get("day"))
+
+
+def _normalize_constraints(constraints):
+    data = constraints or {}
+    return {
+        "blockedSlots": list(data.get("blockedSlots") or []),
+        "reservedSlots": list(data.get("reservedSlots") or []),
+        "roomLocks": list(data.get("roomLocks") or []),
+        "maxPeriodsPerDay": int(data.get("maxPeriodsPerDay") or 10),
+        "roomTypeMatch": bool(data.get("roomTypeMatch") is True),
+    }
+
+
+def _slot_matches_rule(slot, rule):
+    slot_day = int(slot.get("day") or 0)
+    slot_period = int(slot.get("period") or 0)
+    rule_day = str(rule.get("day") or "").strip()
+    if not rule_day:
+        return False
+    if rule_day.lower() == "mon" and slot_day != 1:
+        return False
+    if rule_day.lower() == "tue" and slot_day != 2:
+        return False
+    if rule_day.lower() == "wed" and slot_day != 3:
+        return False
+    if rule_day.lower() == "thu" and slot_day != 4:
+        return False
+    if rule_day.lower() == "fri" and slot_day != 5:
+        return False
+    periods = rule.get("periods")
+    if periods == "all":
+        return True
+    if isinstance(periods, list):
+        return slot_period in periods
+    return slot_period == periods
+
+
+def _teacher_matches_blocked(teacher, rule):
+    who = rule.get("who")
+    if who == "all":
+        return True
+    if isinstance(who, dict):
+        role = str(who.get("role") or "").lower()
+        teacher_role = str(teacher.get("role") or "").lower()
+        return role in teacher_role or teacher_role in role
+    if isinstance(who, list):
+        return str(teacher.get("teacher_id") or "") in {str(v) for v in who}
+    return False
+
+
+def _summarize_rejections(stats):
+    lines = []
+    for key, items in stats.items():
+        if key == 'created_vars':
+            continue
+        if not isinstance(items, list):
+            continue
+        lines.append(f"{key}: total={len(items)} examples={items[:5]}")
+    return "\n".join(lines)
+
+
 def solve_timetable(data):
+    started = perf_counter()
+    constraints = _normalize_constraints(data.get("constraints"))
     model = cp_model.CpModel()
 
     teachers = data.get("teachers", [])
@@ -31,7 +123,7 @@ def solve_timetable(data):
     teaches = data.get("teaches") or data.get("teach") or []
     registers = data.get("registers", [])
     timeslots = data.get("timeslots", [])
-    room_locks = data.get("room_locks") or []
+    room_locks = data.get("room_locks") or constraints.get("roomLocks") or []
     time_limit = float(data.get("time_limit_seconds") or 60)
 
     subject_by_id = {str(s.get("subject_id")): s for s in subjects}
@@ -46,102 +138,193 @@ def solve_timetable(data):
 
     locked_rooms = defaultdict(set)
     for lock in room_locks:
-        locked_rooms[str(lock.get("subject_id"))].add(str(lock.get("room_id")))
+        sid = str(lock.get("subject_id") or lock.get("subjectId") or "")
+        rid = str(lock.get("room_id") or lock.get("roomId") or "")
+        if sid and rid:
+            locked_rooms[sid].add(rid)
 
-    x = {}
+    blocked_day_periods = set()
+    for rule in constraints.get("blockedSlots") or []:
+        if not rule.get("enabled", True):
+            continue
+        if not rule.get("day"):
+            continue
+        for slot in timeslots:
+            if _slot_matches_rule(slot, rule):
+                blocked_day_periods.add((int(slot.get("day") or 0), int(slot.get("period") or 0)))
+
+    reserved_by_subject = defaultdict(list)
+    for rule in constraints.get("reservedSlots") or []:
+        if not rule.get("enabled", True):
+            continue
+        for sid in rule.get("subjects") or []:
+            reserved_by_subject[str(sid)].append({
+                "day": str(rule.get("day") or ""),
+                "periods": rule.get("periods") or [],
+            })
+
+    candidate_vars = {}
+    rejection_stats = defaultdict(list)
     for reg in registers:
         g = str(reg.get("group_id"))
         s = str(reg.get("subject_id"))
         sub = subject_by_id.get(s, {})
         allowed_teachers = teachers_for_subject.get(s) or ([str(reg["teacher_id"])] if reg.get("teacher_id") else [])
         if not allowed_teachers:
+            rejection_stats["no_teacher_in_teach"].append({"group_id": g, "subject_id": s, "reason": "no teacher in teach"})
             continue
 
-        theory_only = int(sub.get("theory_hours") or 0) > 0 and int(sub.get("practice_hours") or 0) == 0
-        has_practice = int(sub.get("practice_hours") or 0) > 0
-        activity = _is_activity(sub)
+        total_hours = _hours(sub)
+        if total_hours <= 0:
+            rejection_stats["zero_total_hours"].append({"group_id": g, "subject_id": s, "total_hours": total_hours})
+            continue
+
         required_rooms = locked_rooms.get(s)
+        if required_rooms is not None and not required_rooms:
+            rejection_stats["no_room_after_lock_filter"].append({"group_id": g, "subject_id": s, "reason": "room lock set empty"})
 
-        for t in allowed_teachers:
-            t_info = teacher_by_id.get(t, {})
-            for r_info in rooms:
-                r = str(r_info.get("room_id"))
-                rtype = _room_type(r_info)
-                if required_rooms and r not in required_rooms:
+        room_candidates = list(rooms)
+        if required_rooms:
+            room_candidates = [r for r in rooms if str(r.get("room_id")) in required_rooms]
+        if constraints.get("roomTypeMatch"):
+            subject_room_type = str(sub.get("room_type") or "").strip().lower()
+            if subject_room_type:
+                room_candidates = [r for r in room_candidates if _room_type(r) == subject_room_type]
+                if not room_candidates:
+                    rejection_stats["no_room_after_type_filter"].append({
+                        "group_id": g,
+                        "subject_id": s,
+                        "subject_room_type": subject_room_type,
+                        "reason": "no room remains after room type filter",
+                    })
+
+        valid_slots = []
+        for slot in timeslots:
+            slot_id = str(slot.get("timeslot_id"))
+            day = _day_number(slot.get("day"))
+            period = int(slot.get("period") or 0)
+            if period == 5:
+                continue
+            if day == 0:
+                continue
+            valid_slots.append({"slot_id": slot_id, "day": day, "period": period})
+
+        if not valid_slots:
+            rejection_stats["no_slot_after_day_period_filter"].append({"group_id": g, "subject_id": s, "reason": "no valid timeslots remain after day/period filtering"})
+
+        for tid in allowed_teachers:
+            t_info = teacher_by_id.get(tid, {})
+            teacher_slot_candidates = []
+            for slot in timeslots:
+                slot_id = str(slot.get("timeslot_id"))
+                day = _day_number(slot.get("day"))
+                period = int(slot.get("period") or 0)
+                if period == 5:
                     continue
-                if theory_only and rtype and rtype != "theory":
+                if day == 0:
                     continue
-                if has_practice and rtype == "theory":
+                if (day, period) in blocked_day_periods and _teacher_matches_blocked(t_info, {"who": "all"}):
                     continue
-
-                for slot in timeslots:
-                    slot_id = str(slot.get("timeslot_id"))
-                    day = int(slot.get("day") or 0)
-                    period = int(slot.get("period") or 0)
-
-                    if period == 5:
+                for rule in constraints.get("blockedSlots") or []:
+                    if not rule.get("enabled", True):
                         continue
-                    if t_info.get("is_leader") and day == 2 and period == 8:
+                    if _slot_matches_rule(slot, rule) and _teacher_matches_blocked(t_info, rule):
                         continue
-                    activity_slot = day == 3 and period in (8, 9)
-                    if activity and not activity_slot:
+                if reserved_by_subject.get(s):
+                    allowed = False
+                    for rule_info in reserved_by_subject[s]:
+                        if str(rule_info["day"]).lower() in {"mon", "tue", "wed", "thu", "fri"}:
+                            if day == {
+                                "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5,
+                            }.get(str(rule_info["day"]).lower()):
+                                periods = rule_info["periods"]
+                                if periods == "all" or period in periods:
+                                    allowed = True
+                    if not allowed and any(rule_info.get("day") for rule_info in reserved_by_subject[s]):
                         continue
-                    if (not activity) and activity_slot:
-                        continue
+                teacher_slot_candidates.append(slot_id)
 
-                    x[(g, s, t, r, slot_id)] = model.NewBoolVar(f"x_{g}_{s}_{t}_{r}_{slot_id}")
+            if not teacher_slot_candidates:
+                rejection_stats["no_slot_after_teacher_filter"].append({
+                    "group_id": g,
+                    "subject_id": s,
+                    "teacher_id": tid,
+                    "reason": "teacher has no valid slot after day/period and blocked/reserved filtering",
+                })
+                continue
 
-    if not x:
-        return {"status": "INFEASIBLE", "schedule": [], "reason": "no valid assignment variables"}
+            for slot_id in teacher_slot_candidates:
+                key = (g, s, tid, slot_id)
+                var = model.NewBoolVar(f"x_{g}_{s}_{tid}_{slot_id}")
+                candidate_vars[key] = var
+
+    if candidate_vars:
+        print("VARIABLE_GENERATION_SUMMARY")
+        total_created = len(candidate_vars)
+        print(f"created_vars={total_created}")
+        for key, items in rejection_stats.items():
+            print(f"{key}={len(items)}")
+            for item in items[:5]:
+                print(item)
+        print("---")
+    else:
+        print("VARIABLE_GENERATION_SUMMARY")
+        print(f"created_vars=0")
+        for key, items in rejection_stats.items():
+            print(f"{key}={len(items)}")
+            for item in items[:5]:
+                print(item)
+        print("---")
+        return {
+            "status": "MODEL_INVALID",
+            "solver_status": "MODEL_INVALID",
+            "schedule": [],
+            "runtime_seconds": round(perf_counter() - started, 3),
+            "reason": "no assignment variables created; rejects: " + "; ".join(
+                f"{k}={len(v)}" for k, v in rejection_stats.items()
+            ),
+            "debug": {
+                "variable_generation": {k: len(v) for k, v in rejection_stats.items()},
+                "examples": {k: v[:5] for k, v in rejection_stats.items() if v},
+            },
+        }
+
+    print(_summarize_rejections(rejection_stats))
 
     for reg in registers:
         g = str(reg.get("group_id"))
         s = str(reg.get("subject_id"))
         total_hours = _hours(subject_by_id.get(s, {}))
-        valid_vars = [var for key, var in x.items() if key[0] == g and key[1] == s]
-        if valid_vars:
-            model.Add(sum(valid_vars) == total_hours)
+        vars_for_reg = [var for key, var in candidate_vars.items() if key[0] == g and key[1] == s]
+        if vars_for_reg:
+            model.Add(sum(vars_for_reg) == total_hours)
         elif total_hours > 0:
-            return {"status": "INFEASIBLE", "schedule": [], "reason": f"no slots for {g}/{s}"}
+            return {"status": "MODEL_INVALID", "solver_status": "MODEL_INVALID", "schedule": [], "runtime_seconds": round(perf_counter() - started, 3), "reason": f"no valid variable set for {g}/{s}"}
 
-    group_ids = [str(g.get("group_id")) for g in groups] or sorted({k[0] for k in x})
+    group_ids = [str(g.get("group_id")) for g in groups] or sorted({k[0] for k in candidate_vars})
     for g in group_ids:
         for slot in timeslots:
             slot_id = str(slot.get("timeslot_id"))
-            g_vars = [var for key, var in x.items() if key[0] == g and key[4] == slot_id]
-            if g_vars:
-                model.Add(sum(g_vars) <= 1)
+            slot_vars = [var for key, var in candidate_vars.items() if key[0] == g and key[3] == slot_id]
+            if slot_vars:
+                model.Add(sum(slot_vars) <= 1)
 
-    def add_unique_class(index):
-        by_slot = defaultdict(lambda: defaultdict(list))
-        for key, var in x.items():
-            _g, s, t, r, slot_id = key
-            class_key = (s, t, r) if index == "teacher" else (s, t)
-            # รวมหลายกลุ่มเป็น "คาบเดียว" ได้เฉพาะวิชาเรียนร่วม 20000/30000 (C13)
-            # วิชาอื่นทุกกลุ่มนับเป็นคาบแยก จึงใช้ครู/ห้องซ้อนเวลากันไม่ได้ (C06, C07)
-            if not _is_shared(s):
-                class_key = class_key + (_g,)
-            owner = t if index == "teacher" else r
-            by_slot[(owner, slot_id)][class_key].append(var)
-        for (_owner, _slot_id), classes in by_slot.items():
-            flags = []
-            for vars_in_class in classes.values():
-                flag = model.NewBoolVar(f"{index}_{_owner}_{_slot_id}_{len(flags)}")
-                model.AddMaxEquality(flag, vars_in_class)
-                flags.append(flag)
-            if flags:
-                model.Add(sum(flags) <= 1)
+    for tid in {str(t.get("teacher_id")) for t in teachers}:
+        for slot in timeslots:
+            slot_id = str(slot.get("timeslot_id"))
+            teacher_vars = [var for key, var in candidate_vars.items() if key[2] == tid and key[3] == slot_id]
+            if teacher_vars:
+                model.Add(sum(teacher_vars) <= 1)
 
-    add_unique_class("teacher")
-    add_unique_class("room")
-
-    days = sorted({int(slot.get("day") or 0) for slot in timeslots})
     for g in group_ids:
-        for day in days:
-            day_slots = {str(slot.get("timeslot_id")) for slot in timeslots if int(slot.get("day") or 0) == day}
-            day_vars = [var for key, var in x.items() if key[0] == g and key[4] in day_slots]
+        for day in sorted({ _day_number(slot.get("day")) for slot in timeslots if _day_number(slot.get("day")) > 0 }):
+            day_vars = [
+                var for key, var in candidate_vars.items()
+                if key[0] == g and any(str(slot.get("timeslot_id")) == key[3] and _day_number(slot.get("day")) == day for slot in timeslots)
+            ]
+            max_day = int(constraints.get("maxPeriodsPerDay") or 10)
             if day_vars:
-                model.Add(sum(day_vars) <= 10)
+                model.Add(sum(day_vars) <= max_day)
 
     shared_groups = defaultdict(set)
     for reg in registers:
@@ -149,41 +332,50 @@ def solve_timetable(data):
         if _is_shared(sid):
             shared_groups[sid].add(str(reg.get("group_id")))
     for sid, group_set in shared_groups.items():
-        group_list = list(group_set)
-        if len(group_list) < 2:
+        g_list = sorted(group_set)
+        if len(g_list) < 2:
             continue
-        by_class = defaultdict(dict)
-        for key, var in x.items():
-            g, s, t, r, slot_id = key
-            if s != sid:
+        for slot in timeslots:
+            slot_id = str(slot.get("timeslot_id"))
+            assigned = [
+                var for key, var in candidate_vars.items()
+                if key[1] == sid and key[3] == slot_id and key[0] in g_list
+            ]
+            if not assigned:
                 continue
-            by_class[(t, r, slot_id)][g] = var
-        g0 = group_list[0]
-        for others in by_class.values():
-            if g0 not in others:
-                continue
-            for g in group_list[1:]:
-                if g in others:
-                    model.Add(others[g0] == others[g])
+            for idx in range(1, len(g_list)):
+                first = [var for key, var in candidate_vars.items() if key[0] == g_list[0] and key[1] == sid and key[3] == slot_id]
+                current = [var for key, var in candidate_vars.items() if key[0] == g_list[idx] and key[1] == sid and key[3] == slot_id]
+                if first and current:
+                    model.Add(sum(first) == sum(current))
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = max(5.0, time_limit)
+    solver.parameters.max_time_in_seconds = max(5.0, min(120.0, time_limit))
+    solver.parameters.num_search_workers = 8
     status = solver.Solve(model)
+    elapsed = perf_counter() - started
 
-    output_schedule = []
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        for key, var in x.items():
-            if solver.Value(var) == 1:
-                output_schedule.append({
+        schedule = []
+        for key, var in candidate_vars.items():
+            if solver.Value(var):
+                schedule.append({
                     "group_id": key[0],
                     "subject_id": key[1],
                     "teacher_id": key[2],
-                    "room_id": key[3],
-                    "timeslot_id": key[4],
+                    "timeslot_id": key[3],
+                    "room_id": "",
                 })
-        solver_status = "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE"
-        return {"status": "SUCCESS", "solver_status": solver_status, "schedule": output_schedule}
+        return {
+            "status": "SUCCESS",
+            "solver_status": "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE",
+            "schedule": schedule,
+            "runtime_seconds": round(elapsed, 3),
+            "logs": [{"level": "info", "stage": "solve", "message": f"solver status={status} elapsed={elapsed:.3f}s"}],
+            "variables": len(candidate_vars),
+        }
 
     if status == cp_model.UNKNOWN:
-        return {"status": "UNKNOWN", "solver_status": "UNKNOWN", "schedule": []}
-    return {"status": "INFEASIBLE", "solver_status": "INFEASIBLE", "schedule": []}
+        return {"status": "UNKNOWN", "solver_status": "UNKNOWN", "schedule": [], "runtime_seconds": round(elapsed, 3), "reason": "time limit reached", "variables": len(candidate_vars)}
+
+    return {"status": "INFEASIBLE", "solver_status": "INFEASIBLE", "schedule": [], "runtime_seconds": round(elapsed, 3), "reason": "base constraints conflict", "variables": len(candidate_vars)}

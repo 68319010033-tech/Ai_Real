@@ -24,6 +24,12 @@ function isLeader(role) {
   return /leader/i.test(String(role || ''));
 }
 
+function isEnglishSubject(subject = {}) {
+  const subjectId = String(subject.subject_id || '').trim();
+  const subjectName = String(subject.subject_name || '').trim();
+  return subjectId === '30000-1202' || /english|อังกฤษ/i.test(`${subjectId} ${subjectName}`);
+}
+
 function buildRoomLocks(tables, specialRules = []) {
   const subjects = rows(tables, 'subject');
   const selected = new Set(specialRules);
@@ -39,11 +45,11 @@ function buildRoomLocks(tables, specialRules = []) {
   add('C15', 'R6203', (s) => ['31901-2002', '31900-0004'].includes(String(s.subject_id)));
   add('C16', 'R6405', (s) => ['31901-2006', '31901-2009'].includes(String(s.subject_id)));
   add('C17', 'R6205', (s) => String(s.subject_id) === '21901-2010');
-  add('C18', 'R5204', (s) => /30000-1202|english|อังกฤษ/i.test(`${s.subject_id} ${s.subject_name}`));
+  add('C18', 'R5204', isEnglishSubject);
   return locks;
 }
 
-function buildSolverPayload(tables, specialRules = [], timeLimitSeconds = 60) {
+function buildSolverPayload(tables, specialRules = [], timeLimitSeconds = 60, constraints = {}) {
   const teachers = rows(tables, 'teacher').map((t) => ({
     teacher_id: String(t.teacher_id),
     teacher_name: t.teacher_name,
@@ -67,6 +73,8 @@ function buildSolverPayload(tables, specialRules = [], timeLimitSeconds = 60) {
   const subjects = rows(tables, 'subject').map((s) => ({
     subject_id: String(s.subject_id),
     subject_name: s.subject_name,
+    theory: num(s.theory),
+    practice: num(s.practice),
     theory_hours: num(s.theory),
     practice_hours: num(s.practice),
     credit: num(s.credit),
@@ -100,6 +108,13 @@ function buildSolverPayload(tables, specialRules = [], timeLimitSeconds = 60) {
     registers,
     timeslots,
     special_rules: specialRules,
+    constraints: {
+      blockedSlots: Array.isArray(constraints.blockedSlots) ? constraints.blockedSlots : [],
+      reservedSlots: Array.isArray(constraints.reservedSlots) ? constraints.reservedSlots : [],
+      roomLocks: Array.isArray(constraints.roomLocks) ? constraints.roomLocks : [],
+      maxPeriodsPerDay: Number(constraints.maxPeriodsPerDay) || 10,
+      roomTypeMatch: Boolean(constraints.roomTypeMatch),
+    },
     room_locks: buildRoomLocks(tables, specialRules),
     time_limit_seconds: Number(timeLimitSeconds) || 60,
   };
