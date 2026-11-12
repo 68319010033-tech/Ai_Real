@@ -7,6 +7,9 @@ const scheduleRoutes = require('./routes/schedule');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
+// อยู่หลัง proxy ของ Render: ให้ Express อ่าน IP จริงของผู้ใช้จาก X-Forwarded-For
+// (ไม่งั้น rate limit จะมองทุกคนเป็น IP เดียวกัน)
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
