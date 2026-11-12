@@ -1,3 +1,5 @@
+const { jointPolicy } = require('./jointClasses');
+
 const DAY_NUM = {
   Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5,
   Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5,
@@ -109,6 +111,7 @@ function buildSolverPayload(tables, specialRules = [], timeLimitSeconds = 60, co
     timeslots,
     special_rules: specialRules,
     constraints: {
+      ...jointPolicy(tables),
       blockedSlots: Array.isArray(constraints.blockedSlots) ? constraints.blockedSlots : [],
       reservedSlots: Array.isArray(constraints.reservedSlots) ? constraints.reservedSlots : [],
       roomLocks: Array.isArray(constraints.roomLocks) ? constraints.roomLocks : [],

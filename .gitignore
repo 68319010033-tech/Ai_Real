@@ -47,6 +47,8 @@ __pycache__/
 # Python Virtual Environment
 venv/
 .venv/
+.venv-diagnostic/
+diagnostics/timeout/real-data-local/
 env/
 ENV/
 env.bak/

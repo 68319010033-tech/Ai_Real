@@ -123,6 +123,38 @@ def solve_timetable(data):
     subject_by_id = {str(s.get("subject_id")): s for s in subjects}
     teacher_by_id = {str(t.get("teacher_id")): t for t in teachers}
 
+    joint_sets = {}
+    group_joint = {}
+    registered_groups = defaultdict(set)
+    for reg in registers:
+        registered_groups[str(reg.get("subject_id"))].add(str(reg.get("group_id")))
+    if joint_mode == "pairs":
+        pair_config = raw_constraints.get("jointPairs") or {}
+        try:
+            if not isinstance(pair_config, dict):
+                raise ValueError("jointPairs must be an object keyed by subject ID")
+            for sid, pairs in pair_config.items():
+                if not _is_shared(sid) or not isinstance(pairs, list):
+                    raise ValueError(f"Invalid joint pair subject: {sid}")
+                for pair in pairs:
+                    if not isinstance(pair, list) or len(pair) != 2 or len(set(pair)) != 2:
+                        raise ValueError(f"Each pair for {sid} must contain two distinct group IDs")
+                    members = tuple(sorted(str(g) for g in pair))
+                    if any(g not in registered_groups[sid] or (sid, g) in group_joint for g in members):
+                        raise ValueError(f"Pair for {sid} contains unregistered or repeated groups")
+                    joint_sets[(sid, members)] = members
+                    for g in members:
+                        group_joint[(sid, g)] = members
+        except (ValueError, TypeError) as error:
+            return {"status": "MODEL_INVALID", "solver_status": "MODEL_INVALID", "schedule": [], "reason": str(error)}
+    elif joint_mode == "together":
+        for sid, members in registered_groups.items():
+            if _is_shared(sid):
+                members = tuple(sorted(members))
+                joint_sets[(sid, members)] = members
+                for g in members:
+                    group_joint[(sid, g)] = members
+
     teachers_for_subject = defaultdict(list)
     for row in teaches:
         sid = str(row.get("subject_id"))
@@ -148,16 +180,6 @@ def solve_timetable(data):
                 allowed = [r for r in allowed if _room_type(r) == subject_room_type]
         room_options_by_subject[sid] = allowed
 
-    blocked_day_periods = set()
-    for rule in constraints.get("blockedSlots") or []:
-        if not rule.get("enabled", True):
-            continue
-        if not rule.get("day"):
-            continue
-        for slot in timeslots:
-            if _slot_matches_rule(slot, rule):
-                blocked_day_periods.add((_day_number(slot.get("day")), int(slot.get("period") or 0)))
-
     reserved_by_subject = defaultdict(list)
     for rule in constraints.get("reservedSlots") or []:
         if not rule.get("enabled", True):
@@ -170,7 +192,17 @@ def solve_timetable(data):
 
     candidate_vars = {}
     busy_vars = {}
-    room_choice_vars = {}
+    assignment_events = {}
+    event_assignments = defaultdict(list)
+    event_rooms = {}
+    room_ids = list(dict.fromkeys(str(room.get("room_id")) for room in rooms))
+    room_numbers = {rid: index + 1 for index, rid in enumerate(room_ids)}
+    teacher_slots = defaultdict(list)
+    room_slots = defaultdict(list)
+    registration_vars = defaultdict(list)
+    group_slots = defaultdict(list)
+    group_days = defaultdict(list)
+    slot_days = {str(slot.get("timeslot_id")): _day_number(slot.get("day")) for slot in timeslots}
     rejection_stats = defaultdict(list)
 
     for reg in registers:
@@ -210,7 +242,9 @@ def solve_timetable(data):
                 period = int(slot.get("period") or 0)
                 if period == 5 or day == 0:
                     continue
-                if (day, period) in blocked_day_periods and _teacher_matches_blocked(t_info, {"who": "all"}):
+                # C10 is shown as mandatory in the UI and checked by the
+                # backend validator. Match its case-insensitive role predicate.
+                if "leader" in str(t_info.get("role") or "").lower() and day == 2 and period == 8:
                     continue
                 blocked_here = False
                 for rule in constraints.get("blockedSlots") or []:
@@ -245,20 +279,37 @@ def solve_timetable(data):
 
             for slot_id in teacher_slot_candidates:
                 key = (g, s, tid, slot_id)
+                if key in candidate_vars:
+                    continue
                 var = model.NewBoolVar(f"x_{g}_{s}_{tid}_{slot_id}")
                 candidate_vars[key] = var
+                registration_vars[(g, s)].append(var)
+                group_slots[(g, slot_id)].append(var)
+                group_days[(g, slot_days[slot_id])].append(var)
 
-                busy_key = (tid, s, slot_id)
+                # Only explicitly joint lessons may share a teacher and room.
+                event_group = group_joint.get((s, g), g)
+                busy_key = (event_group, tid, s, slot_id)
+                assignment_events[key] = busy_key
                 if busy_key not in busy_vars:
-                    busy_vars[busy_key] = model.NewBoolVar(f"busy_{tid}_{s}_{slot_id}")
-                model.Add(var <= busy_vars[busy_key])
-
-                for room in room_options_by_subject.get(s, rooms):
-                    rid = str(room.get("room_id"))
-                    room_key = (g, s, tid, slot_id, rid)
-                    rv = model.NewBoolVar(f"r_{g}_{s}_{tid}_{slot_id}_{rid}")
-                    room_choice_vars[room_key] = rv
-                    model.Add(rv <= var)
+                    busy_vars[busy_key] = (
+                        model.NewBoolVar(f"busy_{busy_key}") if isinstance(event_group, tuple) else var
+                    )
+                    teacher_slots[(tid, slot_id)].append(busy_vars[busy_key])
+                    allowed_rooms = {room_numbers[str(room.get("room_id"))]
+                                     for room in room_options_by_subject.get(s, rooms)}
+                    # Inactive events get distinct negative sentinels. Active
+                    # events choose one real room; AllDifferent prevents overlap.
+                    inactive_room = -(len(event_rooms) + 1)
+                    room_var = model.NewIntVarFromDomain(
+                        cp_model.Domain.FromValues(sorted(allowed_rooms | {inactive_room})),
+                        f"event_room_{busy_key}",
+                    )
+                    model.Add(room_var == inactive_room).OnlyEnforceIf(busy_vars[busy_key].Not())
+                    model.Add(room_var != inactive_room).OnlyEnforceIf(busy_vars[busy_key])
+                    event_rooms[busy_key] = room_var
+                    room_slots[slot_id].append(room_var)
+                event_assignments[busy_key].append(var)
 
     if not candidate_vars:
         print("VARIABLE_GENERATION_SUMMARY")
@@ -281,97 +332,65 @@ def solve_timetable(data):
         }
 
     for busy_key, busy_var in busy_vars.items():
-        tid, sid, slot_id = busy_key
-        same_busy_vars = [var for key, var in candidate_vars.items() if key[2] == tid and key[1] == sid and key[3] == slot_id]
-        if same_busy_vars:
-            model.Add(sum(same_busy_vars) >= busy_var)
-            model.Add(sum(same_busy_vars) <= len(same_busy_vars) * busy_var)
+        if isinstance(busy_key[0], tuple):
+            model.AddMaxEquality(busy_var, event_assignments[busy_key])
 
-    for tid in {str(t.get("teacher_id")) for t in teachers}:
-        for slot in timeslots:
-            slot_id = str(slot.get("timeslot_id"))
-            busy_for_slot = [busy_vars[(tid, sid, slot_id)] for sid in {key[1] for key in candidate_vars if key[2] == tid and key[3] == slot_id} if (tid, sid, slot_id) in busy_vars]
-            if busy_for_slot:
-                model.Add(sum(busy_for_slot) <= 1)
+    for busy_for_slot in teacher_slots.values():
+        model.Add(sum(busy_for_slot) <= 1)
 
     for reg in registers:
         g = str(reg.get("group_id"))
         s = str(reg.get("subject_id"))
         total_hours = _hours(subject_by_id.get(s, {}))
-        vars_for_reg = [var for key, var in candidate_vars.items() if key[0] == g and key[1] == s]
+        vars_for_reg = registration_vars[(g, s)]
         if vars_for_reg:
             model.Add(sum(vars_for_reg) == total_hours)
         elif total_hours > 0:
             return {"status": "MODEL_INVALID", "solver_status": "MODEL_INVALID", "schedule": [], "runtime_seconds": round(perf_counter() - started, 3), "reason": f"no valid variable set for {g}/{s}"}
 
-    for g in {str(g.get("group_id")) for g in groups}:
-        for slot in timeslots:
-            slot_id = str(slot.get("timeslot_id"))
-            slot_vars = [var for key, var in candidate_vars.items() if key[0] == g and key[3] == slot_id]
-            if slot_vars:
-                model.Add(sum(slot_vars) <= 1)
+    for slot_vars in group_slots.values():
+        model.Add(sum(slot_vars) <= 1)
+    for day_vars in group_days.values():
+        model.Add(sum(day_vars) <= constraints["maxPeriodsPerDay"])
 
-    for g in {str(g.get("group_id")) for g in groups}:
-        for day in sorted({_day_number(slot.get("day")) for slot in timeslots if _day_number(slot.get("day")) > 0}):
-            day_vars = [
-                var for key, var in candidate_vars.items()
-                if key[0] == g and any(str(slot.get("timeslot_id")) == key[3] and _day_number(slot.get("day")) == day for slot in timeslots)
-            ]
-            max_day = int(constraints.get("maxPeriodsPerDay") or 10)
-            if day_vars:
-                model.Add(sum(day_vars) <= max_day)
+    for event_key, busy_var in busy_vars.items():
+        event_group, tid, sid, slot_id = event_key
+        if isinstance(event_group, tuple):
+            for g in joint_sets[(sid, event_group)]:
+                model.Add(candidate_vars.get((g, sid, tid, slot_id), 0) == busy_var)
 
-    if joint_mode == "together":
-        shared_groups = defaultdict(set)
-        for reg in registers:
-            sid = str(reg.get("subject_id"))
-            if _is_shared(sid):
-                shared_groups[sid].add(str(reg.get("group_id")))
-        for sid, group_set in shared_groups.items():
-            g_list = sorted(group_set)
-            if len(g_list) < 2:
-                continue
-            for slot in timeslots:
-                slot_id = str(slot.get("timeslot_id"))
-                assigned = [var for key, var in candidate_vars.items() if key[1] == sid and key[3] == slot_id and key[0] in g_list]
-                if not assigned:
-                    continue
-                for idx in range(1, len(g_list)):
-                    first = [var for key, var in candidate_vars.items() if key[0] == g_list[0] and key[1] == sid and key[3] == slot_id]
-                    current = [var for key, var in candidate_vars.items() if key[0] == g_list[idx] and key[1] == sid and key[3] == slot_id]
-                    if first and current:
-                        model.Add(sum(first) == sum(current))
-
-    room_usage_by_slot = defaultdict(list)
-    for room_key, var in room_choice_vars.items():
-        _, sid, _, slot_id, rid = room_key
-        room_usage_by_slot[(rid, slot_id)].append((sid, var))
-    for (rid, slot_id), entries in room_usage_by_slot.items():
-        by_subject = defaultdict(list)
-        for sid, var in entries:
-            by_subject[sid].append(var)
-        subject_ids = sorted(by_subject)
-        for i in range(len(subject_ids)):
-            for j in range(i + 1, len(subject_ids)):
-                s1 = subject_ids[i]
-                s2 = subject_ids[j]
-                model.Add(sum(by_subject[s1]) + sum(by_subject[s2]) <= 1)
-
-    for room_key, var in room_choice_vars.items():
-        _, sid, _, slot_id, rid = room_key
-        model.Add(sum([v for k, v in room_choice_vars.items() if k[3] == slot_id and k[4] == rid and k[1] == sid]) >= var)
+    for choices in room_slots.values():
+        model.AddAllDifferent(choices)
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = max(5.0, min(120.0, time_limit))
     solver.parameters.num_search_workers = 8
+    solver.parameters.random_seed = _as_int(data.get("seed"), 1)
+    build_seconds = perf_counter() - started
     status = solver.Solve(model)
     elapsed = perf_counter() - started
+    stats = {
+        "variables": len(model.Proto().variables),
+        "constraints": len(model.Proto().constraints),
+        "conflicts": solver.NumConflicts(),
+        "branches": solver.NumBranches(),
+        "wallTimeSec": round(elapsed, 3),
+        "buildTimeSec": round(build_seconds, 3),
+        "solveTimeSec": round(solver.WallTime(), 3),
+        "objective": None,
+    }
+    logs = [
+        {"level": "info", "stage": "build", "message": f"model built in {build_seconds:.3f}s; variables={stats['variables']} constraints={stats['constraints']}"},
+        {"level": "info", "stage": "solve", "message": f"solver status={solver.StatusName(status)} elapsed={elapsed:.3f}s seed={solver.parameters.random_seed}"},
+    ]
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         schedule = []
-        for key, var in room_choice_vars.items():
+        for key, var in candidate_vars.items():
             if solver.Value(var):
-                g, s, tid, slot_id, rid = key
+                g, s, tid, slot_id = key
+                room_number = solver.Value(event_rooms[assignment_events[key]])
+                rid = room_ids[room_number - 1]
                 schedule.append({
                     "group_id": g,
                     "subject_id": s,
@@ -384,11 +403,14 @@ def solve_timetable(data):
             "solver_status": "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE",
             "schedule": schedule,
             "runtime_seconds": round(elapsed, 3),
-            "logs": [{"level": "info", "stage": "solve", "message": f"solver status={status} elapsed={elapsed:.3f}s"}],
+            "logs": logs,
+            "stats": stats,
             "variables": len(candidate_vars),
         }
 
     if status == cp_model.UNKNOWN:
-        return {"status": "UNKNOWN", "solver_status": "UNKNOWN", "schedule": [], "runtime_seconds": round(elapsed, 3), "reason": "time limit reached", "variables": len(candidate_vars)}
+        return {"status": "UNKNOWN", "solver_status": "UNKNOWN", "schedule": [], "runtime_seconds": round(elapsed, 3), "reason": "time limit reached", "variables": len(candidate_vars), "logs": logs, "stats": stats}
 
-    return {"status": "INFEASIBLE", "solver_status": "INFEASIBLE", "schedule": [], "runtime_seconds": round(elapsed, 3), "reason": "base constraints conflict", "variables": len(candidate_vars)}
+    final_status = "MODEL_INVALID" if status == cp_model.MODEL_INVALID else "INFEASIBLE"
+    reason = model.Validate() if status == cp_model.MODEL_INVALID else "No solution satisfies the current model; conflicting rules have not been isolated."
+    return {"status": final_status, "solver_status": final_status, "schedule": [], "runtime_seconds": round(elapsed, 3), "reason": reason, "variables": len(candidate_vars), "logs": logs, "stats": stats}
