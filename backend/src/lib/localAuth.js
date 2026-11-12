@@ -15,6 +15,8 @@ function useFirebase() {
 }
 
 // key ใน RTDB ห้ามมี . $ # [ ] / จึงแปลงอีเมลเป็น base64url
+console.log(`[auth] user store: ${useFirebase() ? 'Firebase Realtime Database (ถาวร)' : 'ไฟล์ users.json (หายตอน deploy!)'}`);
+
 function userRef(emailKey) {
   return db.ref(`authUsers/${Buffer.from(emailKey).toString('base64url')}`);
 }

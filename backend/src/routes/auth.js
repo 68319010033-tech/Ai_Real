@@ -29,6 +29,7 @@ router.post('/register', registerLimiter, async (req, res, next) => {
   try {
     // บัญชีหลักถูกเก็บถาวรใน Firebase Realtime Database (authUsers/...)
     const user = await createLocalUser({ email, password, displayName });
+    console.log('[auth] registered new user');
 
     if (canUseFirebase()) {
       try {
@@ -71,6 +72,7 @@ router.post('/login', async (req, res, next) => {
   try {
     const user = await findUserByEmail(email);
     if (!user || !verifyPassword(password, user.salt, user.hash)) {
+      console.warn(`[auth] login failed: ${user ? 'รหัสผ่านไม่ตรง' : 'ไม่พบอีเมลนี้ในระบบ'}`);
       return res.status(401).json({ error: 'อีเมลหรือรหัสผ่านไม่ถูกต้อง' });
     }
 
