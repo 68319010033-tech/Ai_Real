@@ -465,6 +465,7 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
         schedule.scheduleId = scheduleId;
         schedule.datasetVersion = current.datasetVersion;
         schedule.specialRules = current.specialRules;
+        schedule.constraints = payload.constraints;
 
         current.status = 'completed';
         current.solverStatus = schedule.solverStatus;
@@ -600,6 +601,7 @@ router.post('/generate', verifyToken, async (req, res) => {
     }
     const scheduleId = makeScheduleId();
     const schedule = buildScheduleView(scheduleId, 'FEASIBLE', datasetVersion, result.schedule || [], tables);
+    schedule.constraints = payload.constraints;
     schedule.uid = uid;
     schedule.scheduleId = scheduleId;
     schedule.datasetVersion = datasetVersion;

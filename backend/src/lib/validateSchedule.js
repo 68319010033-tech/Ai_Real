@@ -1,4 +1,5 @@
 const { rows, num, dayNumber, isLeader } = require('./dataset');
+const { jointPolicy } = require('./jointClasses');
 
 const RULES = [
   ['C01', 'จำนวนคาบรายวิชา = ทฤษฎี + ปฏิบัติ'],
@@ -13,7 +14,7 @@ const RULES = [
   ['C10', 'Leader ไม่สอนช่วงประชุมอังคารคาบ 8'],
   ['C11', 'มีโฮมรูมอย่างน้อยสัปดาห์ละ 1 คาบ'],
   ['C12', 'วิชากิจกรรมอยู่พุธคาบ 8–9'],
-  ['C13', 'วิชา 20000/30000 เรียนร่วม 2 กลุ่ม'],
+  ['C13', 'วิชาเรียนร่วมตามคู่ที่กำหนด กลุ่มที่ไม่อยู่ในคู่เรียนแยก'],
   ['C14', 'วิชา IOT ต้องใช้ห้อง R6201'],
   ['C15', 'วิชา Network/Server ต้องใช้ห้อง R6203'],
   ['C16', 'วิชา AI/software ต้องใช้ห้อง R6405'],
@@ -90,6 +91,13 @@ function validateSchedule(schedule, tables, specialRules = []) {
     subjectId: String(r.subject_id),
   }));
   const selected = new Set(specialRules);
+  const policy = schedule?.constraints || jointPolicy(tables);
+  function jointGroupKey(e) {
+    if (policy.jointMode === 'together' && isSharedCode(e.subjectId)) return 'all';
+    const pair = policy.jointMode === 'pairs'
+      ? (policy.jointPairs?.[e.subjectId] || []).find((p) => p.includes(e.groupId)) : null;
+    return JSON.stringify(pair ? [...pair].sort() : [e.groupId]);
+  }
   const out = [];
 
   const hoursOf = (subjectId) => {
@@ -174,7 +182,7 @@ function validateSchedule(schedule, tables, specialRules = []) {
     for (const e of events) {
       const key = `${e.teacherId}|${e.timeslotId}`;
       // รวมกลุ่มเป็นคาบเดียวได้เฉพาะวิชา 20000/30000 วิชาอื่นนับแยกตามกลุ่ม
-      const classKey = `${e.subjectId}|${e.roomId}` + (isSharedCode(e.subjectId) ? '' : `|${e.groupId}`);
+      const classKey = `${e.subjectId}|${e.roomId}|${jointGroupKey(e)}`;
       if (!seen[key]) seen[key] = classKey;
       else if (seen[key] !== classKey) {
         violations.push({
@@ -192,7 +200,7 @@ function validateSchedule(schedule, tables, specialRules = []) {
     const seen = {};
     for (const e of events) {
       const key = `${e.roomId}|${e.timeslotId}`;
-      const classKey = `${e.subjectId}|${e.teacherId}` + (isSharedCode(e.subjectId) ? '' : `|${e.groupId}`);
+      const classKey = `${e.subjectId}|${e.teacherId}|${jointGroupKey(e)}`;
       if (!seen[key]) seen[key] = classKey;
       else if (seen[key] !== classKey) {
         violations.push({
@@ -314,7 +322,6 @@ function validateSchedule(schedule, tables, specialRules = []) {
       const violations = [];
       for (const [subjectId, groupSet] of Object.entries(bySubject)) {
         const groups = [...groupSet];
-        if (groups.length < 2) continue;
         const bySlot = {};
         for (const e of events.filter((x) => x.subjectId === subjectId)) {
           const key = `${e.timeslotId}|${e.roomId}|${e.teacherId}`;
@@ -322,10 +329,15 @@ function validateSchedule(schedule, tables, specialRules = []) {
           bySlot[key].add(e.groupId);
         }
         for (const [key, present] of Object.entries(bySlot)) {
-          if (present.size === 1) {
+          const actual = [...present].sort();
+          const expected = policy.jointMode === 'together' ? groups.slice().sort()
+            : policy.jointMode === 'pairs'
+              ? ((policy.jointPairs?.[subjectId] || []).find((pair) => pair.includes(actual[0])) || [actual[0]]).slice().sort()
+              : [actual[0]];
+          if (JSON.stringify(actual) !== JSON.stringify(expected)) {
             const [timeslotId] = key.split('|');
             violations.push({
-              message: `วิชา ${subjectId} ที่คาบ ${timeslotId} มีแค่กลุ่ม ${[...present].join(', ')} ไม่ได้เรียนร่วม`,
+              message: `วิชา ${subjectId} คาบ ${timeslotId} ต้องเป็นกลุ่ม ${expected.join(', ')} แต่พบ ${actual.join(', ')}`,
               groupIds: [...present],
               timeslotId,
             });

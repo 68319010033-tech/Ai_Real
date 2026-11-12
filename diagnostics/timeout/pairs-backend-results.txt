@@ -1,0 +1,14 @@
+✔ payload contains exactly the approved G3/G4 pair (6.1068ms)
+✔ approved pair plus separate G5 passes C06, C07 and C13 (5.4052ms)
+✔ incorrect pair and triple class are rejected (1.9108ms)
+✔ separating an approved pair fails C13 (1.1579ms)
+✔ validator uses saved policy rather than current defaults (0.9187ms)
+✔ G7 singleton has no forced partner (0.4233ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 171.2581
