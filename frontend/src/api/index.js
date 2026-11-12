@@ -16,14 +16,14 @@ http.interceptors.request.use((config) => {
   return config
 })
 
-function callWithFallback(method, candidates, config = {}) {
-  const attempts = [...candidates]
-  const run = (url) => method(url, config)
-
-  return run(attempts.shift()).catch((error) => {
-    if (error?.response?.status !== 404 || !attempts.length) throw error
-    return run(attempts.shift())
-  })
+// ถ้า endpoint ไม่มีจริง (404) ให้ขึ้นข้อความที่บอกว่าเรียก path ไหน แทนการลอง path สำรองเงียบ ๆ
+function notFoundAs(path) {
+  return (error) => {
+    if (error?.response?.status === 404) {
+      throw new Error(`Backend ไม่พบ endpoint ${path} (ตรวจว่า deploy เวอร์ชันล่าสุดแล้ว)`)
+    }
+    throw error
+  }
 }
 
 export function loginRequest(email, password) {
@@ -44,11 +44,8 @@ export function resetPasswordRequest(email, otp, newPassword) {
 
 export function getSchedule(id = 'latest') {
   if (USE_MOCK) return mockApi.getSchedule()
-
-  return callWithFallback(
-    (url) => http.get(url).then((r) => r.data),
-    [`/api/schedule/schedules/${id}`, `/api/schedules/${id}`, `/api/schedule/${id}`],
-  )
+  const path = `/api/schedules/${id}`
+  return http.get(path).then((r) => r.data).catch(notFoundAs(path))
 }
 
 export function importDataset(files) {
@@ -56,48 +53,26 @@ export function importDataset(files) {
 
   const form = new FormData()
   files.forEach((f) => form.append('files', f))
-
-  return callWithFallback(
-    (url) => http.post(url, form).then((r) => r.data),
-    ['/api/schedule/datasets/import', '/api/datasets/import', '/api/schedule/import'],
-  ).catch((error) => {
-    if (error?.response?.status === 404) {
-      throw new Error('Backend ยังไม่ได้ implement /api/datasets/import หรือ /api/schedule/import')
-    }
-    throw error
-  })
+  const path = '/api/datasets/import'
+  return http.post(path, form).then((r) => r.data).catch(notFoundAs(path))
 }
 
 export function startSolve(body) {
   if (USE_MOCK) return mockApi.startSolve(body)
-
-  return callWithFallback(
-    (url) => http.post(url, body).then((r) => r.data),
-    ['/api/schedule/solve-jobs', '/api/solve-jobs', '/api/schedule/generate'],
-  ).catch((error) => {
-    if (error?.response?.status === 404) {
-      throw new Error('Backend ยังไม่ได้ implement solve job endpoint')
-    }
-    throw error
-  })
+  const path = '/api/solve-jobs'
+  return http.post(path, body).then((r) => r.data).catch(notFoundAs(path))
 }
 
 export function getJob(jobId) {
   if (USE_MOCK) return mockApi.getJob(jobId)
-
-  return callWithFallback(
-    (url) => http.get(url).then((r) => r.data),
-    [`/api/schedule/solve-jobs/${jobId}`, `/api/solve-jobs/${jobId}`, `/api/schedule/jobs/${jobId}`],
-  )
+  const path = `/api/solve-jobs/${jobId}`
+  return http.get(path).then((r) => r.data).catch(notFoundAs(path))
 }
 
 export function cancelJob(jobId) {
   if (USE_MOCK) return mockApi.cancelJob(jobId)
-
-  return callWithFallback(
-    (url) => http.post(url).then((r) => r.data),
-    [`/api/schedule/solve-jobs/${jobId}/cancel`, `/api/solve-jobs/${jobId}/cancel`, `/api/schedule/jobs/${jobId}/cancel`],
-  )
+  const path = `/api/solve-jobs/${jobId}/cancel`
+  return http.post(path).then((r) => r.data).catch(notFoundAs(path))
 }
 
 export function errorMessage(e) {
@@ -107,10 +82,8 @@ export function errorMessage(e) {
 export async function exportSchedule(format, scheduleId) {
   if (USE_MOCK) return mockApi.exportSchedule(format)
 
-  const r = await callWithFallback(
-    (url) => http.get(url, { params: { format }, responseType: 'blob' }),
-    [`/api/schedule/schedules/${scheduleId}/export`, `/api/schedules/${scheduleId}/export`, `/api/schedule/${scheduleId}/export`],
-  )
+  const path = `/api/schedules/${scheduleId}/export`
+  const r = await http.get(path, { params: { format }, responseType: 'blob' }).catch(notFoundAs(path))
   const type = r.headers?.['content-type'] || ''
   if (type.includes('application/json')) {
     const text = await r.data.text()
@@ -122,9 +95,6 @@ export async function exportSchedule(format, scheduleId) {
 
 export function getValidation(scheduleId) {
   if (USE_MOCK) return mockApi.getValidation()
-
-  return callWithFallback(
-    (url) => http.post(url).then((r) => r.data),
-    [`/api/schedule/schedules/${scheduleId}/validate`, `/api/schedules/${scheduleId}/validate`, `/api/schedule/${scheduleId}/validate`],
-  )
+  const path = `/api/schedules/${scheduleId}/validate`
+  return http.post(path).then((r) => r.data).catch(notFoundAs(path))
 }

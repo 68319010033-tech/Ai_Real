@@ -35,14 +35,3 @@ const model = defineModel({ type: String, default: '' })
   </div>
 </template>
 
-<style scoped>
-/* พื้นหลัง autofill ของ Chrome/Edge: ทำให้กลืนกับช่องสีขาว ไม่เป็นสี่เหลี่ยมสีฟ้า */
-.auth-input:-webkit-autofill,
-.auth-input:-webkit-autofill:hover,
-.auth-input:-webkit-autofill:focus {
-  -webkit-box-shadow: 0 0 0 1000px #fff inset;
-  -webkit-text-fill-color: var(--color-ink);
-  caret-color: var(--color-ink);
-  transition: background-color 9999s ease-in-out 0s;
-}
-</style>
