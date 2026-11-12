@@ -173,7 +173,8 @@ function validateSchedule(schedule, tables, specialRules = []) {
     const seen = {};
     for (const e of events) {
       const key = `${e.teacherId}|${e.timeslotId}`;
-      const classKey = `${e.subjectId}|${e.roomId}`;
+      // รวมกลุ่มเป็นคาบเดียวได้เฉพาะวิชา 20000/30000 วิชาอื่นนับแยกตามกลุ่ม
+      const classKey = `${e.subjectId}|${e.roomId}` + (isSharedCode(e.subjectId) ? '' : `|${e.groupId}`);
       if (!seen[key]) seen[key] = classKey;
       else if (seen[key] !== classKey) {
         violations.push({
@@ -191,7 +192,7 @@ function validateSchedule(schedule, tables, specialRules = []) {
     const seen = {};
     for (const e of events) {
       const key = `${e.roomId}|${e.timeslotId}`;
-      const classKey = `${e.subjectId}|${e.teacherId}`;
+      const classKey = `${e.subjectId}|${e.teacherId}` + (isSharedCode(e.subjectId) ? '' : `|${e.groupId}`);
       if (!seen[key]) seen[key] = classKey;
       else if (seen[key] !== classKey) {
         violations.push({

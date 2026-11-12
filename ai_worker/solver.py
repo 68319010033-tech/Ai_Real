@@ -117,6 +117,10 @@ def solve_timetable(data):
         for key, var in x.items():
             _g, s, t, r, slot_id = key
             class_key = (s, t, r) if index == "teacher" else (s, t)
+            # รวมหลายกลุ่มเป็น "คาบเดียว" ได้เฉพาะวิชาเรียนร่วม 20000/30000 (C13)
+            # วิชาอื่นทุกกลุ่มนับเป็นคาบแยก จึงใช้ครู/ห้องซ้อนเวลากันไม่ได้ (C06, C07)
+            if not _is_shared(s):
+                class_key = class_key + (_g,)
             owner = t if index == "teacher" else r
             by_slot[(owner, slot_id)][class_key].append(var)
         for (_owner, _slot_id), classes in by_slot.items():
