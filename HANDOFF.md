@@ -1,5 +1,12 @@
 # Ai_Real continuation handoff
 
+## Latest patch — worker/validator alignment
+
+- `ai_worker/solver.py` now enforces C09 (room type from theory/practice, same predicate as validator; opt-out `enforceRoomType:false`) and C12 (activity subjects only Wed periods 8–9, others excluded there; opt-out `enforceActivitySlots:false`). One teacher per group/subject; `register.teacher_id` honoured when it is in `teach`. Output sorted.
+- C11: `backend/src/lib/homeroom.js` adds a virtual `HOMEROOM` subject (1 theory period, one per group) at solve and validate time when the CSV has none; advisor matched by teacher id/name (C19), otherwise any teacher. Disable with `AUTO_HOMEROOM=false`. Stored datasets are not modified.
+- Backend forwards `seed` to the worker in `/solve-jobs` and `/generate`.
+- Tests: 29 worker tests, 12 backend tests pass; synthetic end-to-end (backend payload -> worker -> validator) passes C01–C13.
+
 ## Latest patch — 2026-11-17 resource safeguards
 
 User reported 502 still recurs and explicitly requested fixing it now. Implemented default one CP-SAT search worker (server-owned AI_SOLVER_WORKERS, range 1–8), a per-process nonblocking solve lock, HTTP 503/Retry-After for busy workers, async health endpoint with version `resource-safe-v1`, request-ID/count/timing logs, exception-safe lock release, bounded search input, Docker PORT binding with one Uvicorn process, and backend error classification. HTTP 400 is no longer automatically labeled INFEASIBLE.
