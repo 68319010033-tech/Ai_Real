@@ -7,6 +7,7 @@ const { db } = require('../config/firebase');
 const { parseCsv, tableNameFromFile } = require('../lib/csv');
 const { buildSolverPayload, buildScheduleView } = require('../lib/dataset');
 const { validateSchedule } = require('../lib/validateSchedule');
+const { withHomeroom } = require('../lib/homeroom');
 const verifyToken = require('../middleware/auth');
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -431,7 +432,9 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
     memory.jobs.set(jobId, current);
 
     try {
-      const payload = buildSolverPayload(current.tables, current.specialRules, current.timeLimitSeconds, current.constraints || {});
+      const solveTables = withHomeroom(current.tables);
+      const payload = buildSolverPayload(solveTables, current.specialRules, current.timeLimitSeconds, current.constraints || {});
+      payload.seed = Number.isFinite(current.seed) ? current.seed : 1;
       const timeoutMs = Math.max(45000, (current.timeLimitSeconds + 20) * 1000);
       let result;
       try {
@@ -460,7 +463,7 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
           result.solver_status || 'FEASIBLE',
           current.datasetVersion,
           result.schedule || [],
-          current.tables,
+          solveTables,
         );
         schedule.uid = uid;
         schedule.scheduleId = scheduleId;
@@ -575,7 +578,7 @@ router.post('/schedules/:id/validate', verifyToken, async (req, res) => {
   if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
 
   const datasetRecord = await resolveUserDataset(uid, schedule.datasetVersion, null);
-  const tables = datasetRecord?.tables || null;
+  const tables = datasetRecord?.tables ? withHomeroom(datasetRecord.tables) : null;
   if (!tables) return res.status(400).json({ error: 'ไม่พบชุดข้อมูลที่ใช้สร้างตารางนี้' });
 
   return res.json(validateSchedule(schedule, tables, schedule.specialRules || []));
@@ -597,13 +600,15 @@ router.post('/generate', verifyToken, async (req, res) => {
   if (!tables) return res.status(400).json({ error: 'ไม่พบชุดข้อมูล' });
 
   try {
-    const payload = buildSolverPayload(tables, body.specialRules || [], body.timeLimitSeconds || 60);
+    const solveTables = withHomeroom(tables);
+    const payload = buildSolverPayload(solveTables, body.specialRules || [], body.timeLimitSeconds || 60);
+    payload.seed = Number(body.seed) || 1;
     const result = await runAiSolve(payload, 80000);
     if (result.status !== 'SUCCESS') {
       return res.status(422).json({ error: 'Unable to solve schedule with given constraints' });
     }
     const scheduleId = makeScheduleId();
-    const schedule = buildScheduleView(scheduleId, 'FEASIBLE', datasetVersion, result.schedule || [], tables);
+    const schedule = buildScheduleView(scheduleId, 'FEASIBLE', datasetVersion, result.schedule || [], solveTables);
     schedule.constraints = payload.constraints;
     schedule.uid = uid;
     schedule.scheduleId = scheduleId;

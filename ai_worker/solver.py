@@ -28,10 +28,35 @@ def _day_number(value):
     return _as_int(s, 0)
 
 
-def _hours(subject):
+def _theory_practice(subject):
     theory = _as_int(subject.get("theory") if subject.get("theory") is not None else subject.get("theory_hours"), 0)
     practice = _as_int(subject.get("practice") if subject.get("practice") is not None else subject.get("practice_hours"), 0)
+    return theory, practice
+
+
+def _hours(subject):
+    theory, practice = _theory_practice(subject)
     return theory + practice
+
+
+def _room_ok_for_subject(subject, room):
+    """C09 (same predicate as backend validateSchedule): theory-only subjects
+    need a Theory room; any subject with practice must not use a Theory room.
+    Rooms without a type are never rejected."""
+    rtype = _room_type(room)
+    if not rtype:
+        return True
+    theory, practice = _theory_practice(subject)
+    if practice > 0:
+        return rtype != "theory"
+    if theory > 0:
+        return rtype == "theory"
+    return True
+
+
+def _is_activity_slot(day, period):
+    """C12: activity subjects live in Wednesday periods 8-9 only."""
+    return day == 3 and period in (8, 9)
 
 
 def _is_activity(subject):
@@ -57,6 +82,9 @@ def _normalize_constraints(constraints):
         "roomLocks": list(data.get("roomLocks") or []),
         "maxPeriodsPerDay": int(data.get("maxPeriodsPerDay") or 10),
         "roomTypeMatch": bool(data.get("roomTypeMatch") is True),
+        # C09/C12 are base rules (always on in the UI); allow explicit opt-out only.
+        "enforceRoomType": data.get("enforceRoomType") is not False,
+        "enforceActivitySlots": data.get("enforceActivitySlots") is not False,
         "jointMode": str(data.get("jointMode") or data.get("joint_mode") or "none").strip().lower(),
     }
 
@@ -175,11 +203,15 @@ def solve_timetable(data):
         allowed = list(rooms)
         if locked_rooms.get(sid):
             allowed = [r for r in rooms if str(r.get("room_id")) in locked_rooms[sid]]
-        if constraints.get("roomTypeMatch"):
-            subject_room_type = str(sub.get("room_type") or "").strip().lower()
-            if subject_room_type:
-                allowed = [r for r in allowed if _room_type(r) == subject_room_type]
+        subject_room_type = str(sub.get("room_type") or "").strip().lower()
+        if constraints.get("roomTypeMatch") and subject_room_type:
+            allowed = [r for r in allowed if _room_type(r) == subject_room_type]
+        elif constraints.get("enforceRoomType"):
+            allowed = [r for r in allowed if _room_ok_for_subject(sub, r)]
         room_options_by_subject[sid] = allowed
+
+    activity_ids = {sid for sid, sub in subject_by_id.items() if _is_activity(sub)} \
+        if constraints.get("enforceActivitySlots") else set()
 
     reserved_by_subject = defaultdict(list)
     for rule in constraints.get("reservedSlots") or []:
@@ -211,6 +243,9 @@ def solve_timetable(data):
         s = str(reg.get("subject_id"))
         sub = subject_by_id.get(s, {})
         allowed_teachers = teachers_for_subject.get(s) or ([str(reg["teacher_id"])] if reg.get("teacher_id") else [])
+        reg_teacher = str(reg["teacher_id"]) if reg.get("teacher_id") else ""
+        if reg_teacher and reg_teacher in allowed_teachers:
+            allowed_teachers = [reg_teacher]  # register names the teacher explicitly
         if not allowed_teachers:
             rejection_stats["no_teacher_in_teach"].append({"group_id": g, "subject_id": s, "reason": "no teacher in teach"})
             continue
@@ -247,6 +282,12 @@ def solve_timetable(data):
                 # backend validator. Match its case-insensitive role predicate.
                 if "leader" in str(t_info.get("role") or "").lower() and day == 2 and period == 8:
                     continue
+                in_activity_slot = _is_activity_slot(day, period)
+                if activity_ids:
+                    if s in activity_ids and not in_activity_slot:
+                        continue
+                    if s not in activity_ids and in_activity_slot:
+                        continue
                 blocked_here = False
                 for rule in constraints.get("blockedSlots") or []:
                     if not rule.get("enabled", True):
@@ -339,6 +380,18 @@ def solve_timetable(data):
     for busy_for_slot in teacher_slots.values():
         model.Add(sum(busy_for_slot) <= 1)
 
+    teacher_choice = {}
+    for (g, s, tid, _slot), var in candidate_vars.items():
+        pick = teacher_choice.get((g, s, tid))
+        if pick is None:
+            pick = teacher_choice[(g, s, tid)] = model.NewBoolVar(f"teacher_{g}_{s}_{tid}")
+        model.AddImplication(var, pick)
+    picks_by_reg = defaultdict(list)
+    for (g, s, tid), pick in teacher_choice.items():
+        picks_by_reg[(g, s)].append(pick)
+    for picks in picks_by_reg.values():
+        model.Add(sum(picks) == 1)  # one teacher per group/subject for the whole week
+
     for reg in registers:
         g = str(reg.get("group_id"))
         s = str(reg.get("subject_id"))
@@ -400,6 +453,8 @@ def solve_timetable(data):
                     "timeslot_id": slot_id,
                     "room_id": rid,
                 })
+        slot_order = {str(sl.get("timeslot_id")): i for i, sl in enumerate(timeslots)}
+        schedule.sort(key=lambda r: (r["group_id"], slot_order.get(r["timeslot_id"], 0), r["subject_id"]))
         return {
             "status": "SUCCESS",
             "solver_status": "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE",
