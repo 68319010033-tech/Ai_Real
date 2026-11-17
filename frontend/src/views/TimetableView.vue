@@ -126,7 +126,7 @@ const dayRows = computed(() =>
                 <div v-if="c.ev" class="ev">
                   <strong>{{ c.ev.subjectName }}</strong>
                   <div>{{ c.ev.teacherName || c.ev.teacherId }} · {{ c.rooms.join(' / ') }}</div>
-                  <div class="muted">{{ c.ev.component }}<template v-if="c.span > 1"> · {{ c.span }} คาบ</template></div>
+                  <div v-if="c.span > 1" class="muted">{{ c.span }} คาบ</div>
                   <span v-if="c.ev.sharedEventId" class="badge">เรียนร่วม {{ c.ev.groupIds.join('+') }}</span>
                 </div>
               </td>
