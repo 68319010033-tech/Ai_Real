@@ -1,5 +1,35 @@
 # Ai_Real continuation handoff
 
+## Latest patch — 2026-11-17 resource safeguards
+
+User reported 502 still recurs and explicitly requested fixing it now. Implemented default one CP-SAT search worker (server-owned AI_SOLVER_WORKERS, range 1–8), a per-process nonblocking solve lock, HTTP 503/Retry-After for busy workers, async health endpoint with version `resource-safe-v1`, request-ID/count/timing logs, exception-safe lock release, bounded search input, Docker PORT binding with one Uvicorn process, and backend error classification. HTTP 400 is no longer automatically labeled INFEASIBLE.
+
+Verification: 20 solver tests + 4 runtime tests + 9 backend tests pass; local HTTP smoke passes. Actual approved-pair CSV run: SUCCESS, 237 rows, 18.605 s, one search worker. Core checks plus C10/C13 pass, remaining C09/C12/C11 limitations persist. Evidence is in resource-safe diagnostic logs. See `ai_worker/DEPLOYMENT.md` for exact deployment and verification steps.
+
+This is a mitigation for demonstrated concurrency/resource risks, NOT proof of the original 502 cause or a hosted fix. New code is prepared for publication on `codex/fix-ai-timeout`; remote commit should be checked with git. No direct production deployment has been performed. Worker and backend must both deploy the new code; frontend need not change. Do not resume unrelated activity-rule work until this production stability task is handled.
+
+## Live 502 investigation — 2026-11-17
+
+### Follow-up with confirmed AI URL
+
+- User supplied `https://ai-real-ek52.onrender.com/` and confirmed the friend's backend AI_WORKER_URL matches it.
+- Direct root health check: HTTP 200 in 0.18 s, `AI Worker is running`.
+- Direct synthetic one-lesson POST /solve: HTTP 200 SUCCESS in 0.13 s; real room assigned and build/search statistics returned.
+- One larger synthetic request (65 registrations, 55 slots, 22 rooms; no personal data) returned HTTP 200 UNKNOWN after 34.57 s, with build=3.895 s, search=30.213 s. It did NOT return 502.
+- Retried the previously authorized uploaded real dataset once through the existing logged-in frontend, unchanged defaults (30 s, seed 1, no extra rules). UI now shows completed with solver UNKNOWN / time limit reached, not failed/502. Screenshot: ignored `diagnostics/timeout/real-data-local/live-unknown.jpg`.
+- No code or deployment was changed between the observed 502 and the successful HTTP response. Therefore the original 502 is intermittent/unexplained, not proven fixed. Do not assert cold start, OOM, or URL mismatch as root cause. Hosted compute does not currently find a timetable within the default search budget, whereas local runs did.
+- Proposed next step, pending step-by-step approval: evaluate worker concurrency/resource usage and test a configuration suited to hosted compute. Avoid merely increasing HTTP timeout or claiming UNKNOWN means infeasible. Runtime logs at the original failure would still be needed to establish the 502 cause.
+
+- Fix commit `41266e8f1022a98c8b9ea85eb0c4572e6bcf4fd6` was pushed to `codex/fix-ai-timeout` and verified by fetching. The older publication-pending notes below are historical. A later read of GitHub integration shows the optimized solver there too; live deployed commit is still unverified.
+- User reports 502 during AI processing and supplied the frontend URL and login credentials. Credentials were used only for browser sign-in; do not copy them into this handoff, source, logs, or Git.
+- Frontend: `https://ai-real-7lq1.onrender.com`. Public JS asset `index-B66XAq9l.js` points to `https://backend-40tl.onrender.com`.
+- Backend `/health` returned HTTP 200 with `Backend API is running` in 0.32 seconds.
+- User explicitly authorized uploading the same seven CSV files from the previously tested archive to this website/backend. Login, file reading, and dataset import succeeded. No CSV contents or timetable output were added to Git.
+- Started one AI job with the UI defaults (30 seconds, seed 1, no extra rules). The job transitioned to FAILED and displayed `Request failed with status code 502`. Browser error/warning console was empty. This strongly localizes the failure to backend-to-worker processing; it does not prove OOM, bad worker URL, or a specific deployment failure.
+- Screenshot: ignored local file `diagnostics/timeout/real-data-local/live-502.jpg`.
+- Render connector still returns null for list_services in the previously confirmed workspace. The supplied URL is the frontend, not the AI worker. Next required evidence is the AI service URL or the backend's non-secret `AI_WORKER_URL` value, and ideally worker runtime logs for the failed request. Do not guess the hostname or claim this issue fixed without verifying the worker.
+- No application code, deploy settings, or credentials were changed during this live investigation.
+
 Updated 2026-11-12 (Asia/Bangkok). This records verified work and outstanding decisions, not authorization to skip the user's step-by-step workflow.
 
 ## User request and workflow

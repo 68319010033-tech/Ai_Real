@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
+const { aiError } = require('../lib/aiErrors');
 const multer = require('multer');
 const { db } = require('../config/firebase');
 const { parseCsv, tableNameFromFile } = require('../lib/csv');
@@ -437,7 +438,7 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
         result = await runAiSolve(payload, timeoutMs);
       } catch (error) {
         const detail = error?.response?.data;
-        if (error?.response?.status === 400 || detail?.status === 'INFEASIBLE') {
+        if (detail?.status === 'INFEASIBLE') {
           current.status = 'completed';
           current.solverStatus = 'INFEASIBLE';
           current.error = detail?.detail || 'ไม่พบตารางที่ตรงเงื่อนไขทั้งหมด';
@@ -499,9 +500,11 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
       if (current.status === 'cancelled') return;
       current.status = 'failed';
       current.solverStatus = 'FAILED';
-      current.error = error?.response?.data?.detail || error?.message || 'AI worker unavailable';
+      const failure = aiError(error);
+      current.error = failure.message;
       current.completedAt = new Date().toISOString();
-      current.logs = [];
+      current.logs = [{ level: 'error', stage: 'ai_request', message: failure.message, code: failure.code }];
+      console.error('AI request failed:', { jobId, code: failure.code, httpStatus: error?.response?.status || null });
       current.stats = { variables: 0, constraints: 0, conflicts: 0, branches: 0, wallTimeSec: 0, objective: null };
       memory.jobs.set(jobId, current);
     }

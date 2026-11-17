@@ -1,6 +1,7 @@
 from collections import defaultdict
 from time import perf_counter
 from ortools.sat.python import cp_model
+from runtime_config import search_workers
 
 
 def _as_int(value, default=0):
@@ -364,7 +365,7 @@ def solve_timetable(data):
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = max(5.0, min(120.0, time_limit))
-    solver.parameters.num_search_workers = 8
+    solver.parameters.num_search_workers = search_workers()
     solver.parameters.random_seed = _as_int(data.get("seed"), 1)
     build_seconds = perf_counter() - started
     status = solver.Solve(model)
@@ -377,6 +378,7 @@ def solve_timetable(data):
         "wallTimeSec": round(elapsed, 3),
         "buildTimeSec": round(build_seconds, 3),
         "solveTimeSec": round(solver.WallTime(), 3),
+        "searchWorkers": solver.parameters.num_search_workers,
         "objective": None,
     }
     logs = [
