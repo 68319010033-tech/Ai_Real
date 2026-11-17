@@ -127,6 +127,8 @@ function buildScheduleView(scheduleId, solverStatus, datasetVersion, scheduleRow
   const subjectById = Object.fromEntries(
     rows(tables, 'subject').map((s) => [String(s.subject_id), s]),
   );
+  const teacherById = Object.fromEntries(rows(tables, 'teacher').map((t) => [String(t.teacher_id), t]));
+  const roomById = Object.fromEntries(rows(tables, 'room').map((r) => [String(r.room_id), r]));
   const grouped = new Map();
 
   for (const row of scheduleRows || []) {
@@ -144,7 +146,9 @@ function buildScheduleView(scheduleId, solverStatus, datasetVersion, scheduleRow
         subjectId,
         subjectName: subject.subject_name || subjectId,
         teacherId,
+        teacherName: (teacherById[teacherId] || {}).teacher_name || teacherId,
         roomId,
+        roomName: (roomById[roomId] || {}).room_name || roomId,
         timeslotId,
         component: num(subject.practice) > 0 && num(subject.theory) === 0 ? 'practice' : 'theory',
         sharedEventId: null,
