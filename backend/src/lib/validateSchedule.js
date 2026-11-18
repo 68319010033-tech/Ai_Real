@@ -349,7 +349,7 @@ function validateSchedule(schedule, tables, specialRules = []) {
   }
 
   const extra = [
-    ['C14', 'R6201', (s) => /iot/i.test(`${s.subject_id} ${s.subject_name}`)],
+    ['C14', 'R6201', (s) => /iot|ไอโอที/i.test(`${s.subject_id} ${s.subject_name}`)],
     ['C15', 'R6203', (s) => ['31901-2002', '31900-0004'].includes(String(s.subject_id))],
     ['C16', 'R6405', (s) => ['31901-2006', '31901-2009'].includes(String(s.subject_id))],
     ['C17', 'R6205', (s) => String(s.subject_id) === '21901-2010'],
@@ -373,6 +373,20 @@ function validateSchedule(schedule, tables, specialRules = []) {
         roomId: e.roomId,
       }));
     out.push(result(ruleId, title, violations.length ? 'fail' : 'pass', violations));
+  }
+
+  if (selected.has('C19')) {
+    const groups=Object.fromEntries(rows(tables,'student_group').map(g=>[String(g.group_id),g]));
+    const violations=[];
+    for(const group of Object.values(groups)) {
+      if(!group.advisor_id || !teachers[String(group.advisor_id)]) violations.push({message:`Group ${group.group_id} needs a valid advisor_id`,groupIds:[String(group.group_id)]});
+    }
+    for(const event of events) {
+      if(isHomeroom(subjects[event.subjectId] || {}) && event.teacherId!==String(groups[event.groupId]?.advisor_id || '')) {
+        violations.push({message:`Homeroom teacher does not match advisor_id for ${event.groupId}`,groupIds:[event.groupId]});
+      }
+    }
+    out.push(result('C19','Homeroom taught by the explicitly mapped advisor',violations.length ? 'fail':'pass',violations));
   }
 
   return {
