@@ -1,0 +1,17 @@
+✔ gateway failures stay distinct from solver infeasibility (1.29ms)
+✔ busy worker and request timeout have separate messages (0.2221ms)
+✔ invalid request is not treated as infeasible and structured detail is safe (0.2722ms)
+✔ payload contains exactly the approved G3/G4 pair (5.7457ms)
+✔ approved pair plus separate G5 passes C06, C07 and C13 (5.6656ms)
+✔ incorrect pair and triple class are rejected (1.4619ms)
+✔ separating an approved pair fails C13 (0.9536ms)
+✔ validator uses saved policy rather than current defaults (0.7643ms)
+✔ G7 singleton has no forced partner (0.434ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 160.3583

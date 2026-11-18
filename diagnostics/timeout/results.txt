@@ -1,0 +1,17 @@
+GitHub integration solver blob: 9cd14b14806dea4ff1dccd968e6f2f62af4d0f64
+All cases use synthetic data, not user data.
+{"synthetic": true, "registrations": 1, "room_variables_expected": 1, "seed": "production default; seed is not set by solver"}
+{"stage": "search_start", "build_seconds": 0.001, "variables": 3, "constraints": 9}
+{"stage": "result", "status": "SUCCESS", "expected_rows": 1, "actual_rows": 0, "elapsed_seconds": 0.033}
+
+
+exit=0
+{"synthetic": true, "registrations": 10, "room_variables_expected": 12100, "seed": "production default; seed is not set by solver"}
+{"stage": "search_start", "build_seconds": 17.218, "variables": 13200, "constraints": 81460}
+{"stage": "result", "status": "SUCCESS", "expected_rows": 10, "actual_rows": 0, "elapsed_seconds": 17.888}
+
+
+exit=0
+{"synthetic": true, "registrations": 40, "room_variables_expected": 48400, "seed": "production default; seed is not set by solver"}
+
+Stopped after 55 seconds; subprocess terminated.

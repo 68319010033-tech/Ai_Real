@@ -1,0 +1,11 @@
+INFO:     Started server process [6128]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:59721 (Press CTRL+C to quit)
+INFO:     127.0.0.1:59726 - "GET / HTTP/1.1" 200 OK
+INFO:     solve_start request_id=c27a3b0a2efc4fc09de69421093236ad registrations=1 slots=1 rooms=1 workers=1
+INFO:     solve_end request_id=c27a3b0a2efc4fc09de69421093236ad status=SUCCESS elapsed=0.016
+INFO:     127.0.0.1:59727 - "POST /solve HTTP/1.1" 200 OK
+INFO:     solve_start request_id=e2b5b0ac82f34d448cddd9131ddfacd5 registrations=1 slots=1 rooms=0 workers=1
+INFO:     solve_end request_id=e2b5b0ac82f34d448cddd9131ddfacd5 status=INFEASIBLE elapsed=0.001
+INFO:     127.0.0.1:59728 - "POST /solve HTTP/1.1" 200 OK

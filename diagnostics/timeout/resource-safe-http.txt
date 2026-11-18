@@ -1,0 +1,2 @@
+{"synthetic": true, "endpoint": "/solve", "rooms": 1, "status": "SUCCESS", "rows": 1, "check": "PASS"}
+{"synthetic": true, "endpoint": "/solve", "rooms": 0, "status": "INFEASIBLE", "rows": 0, "check": "PASS"}

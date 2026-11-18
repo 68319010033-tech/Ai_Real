@@ -1,0 +1,125 @@
+{
+  "wall": 3.5519133000016154,
+  "baselineMB": 44.44921875,
+  "peakRSSMB": 119.69921875,
+  "serverPeakMB": 46.64453125,
+  "combinedPeakUpperBoundMB": 166.34375,
+  "runtime_version": "async-jobs-v2",
+  "status": "SUCCESS",
+  "stats": {
+    "variables": 11744,
+    "constraints": 2627,
+    "conflicts": 55,
+    "branches": 24406,
+    "wallTimeSec": 1.515,
+    "buildTimeSec": 1.261,
+    "solveTimeSec": 0.142,
+    "searchWorkers": 1,
+    "profile": "fast",
+    "objective": null
+  },
+  "counts": {
+    "teachers": 18,
+    "rooms": 22,
+    "student_groups": 8,
+    "subjects": 42,
+    "teaches": 68,
+    "registers": 73,
+    "timeslots": 60,
+    "special_rules": 0,
+    "room_locks": 0
+  },
+  "profile": "fast",
+  "validation": [
+    {
+      "rule": "C01",
+      "status": "pass",
+      "violations": 0
+    },
+    {
+      "rule": "C02",
+      "status": "pass",
+      "violations": 0
+    },
+    {
+      "rule": "C03",
+      "status": "pass",
+      "violations": 0
+    },
+    {
+      "rule": "C04",
+      "status": "pass",
+      "violations": 0
+    },
+    {
+      "rule": "C05",
+      "status": "pass",
+      "violations": 0
+    },
+    {
+      "rule": "C06",
+      "status": "pass",
+      "violations": 0
+    },
+    {
+      "rule": "C07",
+      "status": "pass",
+      "violations": 0
+    },
+    {
+      "rule": "C08",
+      "status": "pass",
+      "violations": 0
+    },
+    {
+      "rule": "C09",
+      "status": "pass",
+      "violations": 0
+    },
+    {
+      "rule": "C10",
+      "status": "pass",
+      "violations": 0
+    },
+    {
+      "rule": "C11",
+      "status": "pass",
+      "violations": 0
+    },
+    {
+      "rule": "C12",
+      "status": "pass",
+      "violations": 0
+    },
+    {
+      "rule": "C13",
+      "status": "pass",
+      "violations": 0
+    },
+    {
+      "rule": "C14",
+      "status": "inactive",
+      "violations": 0
+    },
+    {
+      "rule": "C15",
+      "status": "inactive",
+      "violations": 0
+    },
+    {
+      "rule": "C16",
+      "status": "inactive",
+      "violations": 0
+    },
+    {
+      "rule": "C17",
+      "status": "inactive",
+      "violations": 0
+    },
+    {
+      "rule": "C18",
+      "status": "inactive",
+      "violations": 0
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+@theme static {
+  --font-sans: "IBM Plex Sans Thai", system-ui, sans-serif;
+  --color-side: #14304a;
+  --color-accent: #0e7c86;
+  --color-accent-soft: #d8eef0;
+  --color-canvas: #f2f5f8;
+  --color-line: #d9e0e8;
+  --color-ink: #16212e;
+  --color-muted: #5d6b7d;
+}
+
+:root {
+  --surface: #fff;
+  --line: #d9e0e8;
+  --accent: #0e7c86;
+  --lock: #e6eaf0;
+  --shared: #6d3bb0;
+}
+
+body { margin: 0; background: var(--color-canvas); color: var(--color-ink); }
+:focus-visible { outline: 3px solid #7cc4cb; outline-offset: 2px; }
+
+.muted { color: var(--color-muted); }
+.err { color: #b3261e; }
+.scroll { overflow-x: auto; }
+.panel { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; padding: 9px 18px; border-radius: 8px; background: var(--color-accent); color: #fff; font-weight: 600; cursor: pointer; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-ghost { background: #fff; color: var(--color-ink); border: 1px solid var(--line); }
+
+select { border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; background: #fff; }
+
+/* ช่องกรอกหน้า Login/Register/ForgotPassword: วงเรืองแสงวาดที่กรอบนอกแทน จึงปิด outline ของตัว input */
+.auth-input:focus-visible { outline: none; }
+
+/* พื้นหลัง autofill ของ Chrome/Edge: ให้กลืนกับช่องสีขาว ไม่เป็นสี่เหลี่ยมสีฟ้า */
+.auth-input:-webkit-autofill,
+.auth-input:-webkit-autofill:hover,
+.auth-input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #fff inset;
+  -webkit-text-fill-color: var(--color-ink);
+  caret-color: var(--color-ink);
+  transition: background-color 9999s ease-in-out 0s;
+}

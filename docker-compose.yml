@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - AI_WORKER_URL=http://ai_worker:8000
+      - FIREBASE_KEY_PATH=/app/serviceAccountKey.json
+      - FIREBASE_DATABASE_URL=https://your-project-id-default-rtdb.firebaseio.com # <-- เปลี่ยนเป็น URL จริงของคุณ
+    volumes:
+      - ./serviceAccountKey.json:/app/serviceAccountKey.json
+    depends_on:
+      - ai_worker
+
+  ai_worker:
+    build:
+      context: ./ai_worker
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+
+networks:
+  default:
+    name: timetable-network

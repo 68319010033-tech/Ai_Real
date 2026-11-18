@@ -1,0 +1,25 @@
+test_block_applies_only_to_selected_teacher (test_solver.SolverRegressionTests) ... ok
+test_different_rooms_allow_simultaneous_lessons (test_solver.SolverRegressionTests) ... ok
+test_group_cannot_attend_two_lessons_at_once (test_solver.SolverRegressionTests) ... ok
+test_inactive_candidates_do_not_occupy_rooms (test_solver.SolverRegressionTests) ... ok
+test_joint_lesson_cannot_collide_with_another_subject (test_solver.SolverRegressionTests) ... ok
+test_joint_lesson_counts_once_for_teacher_and_room (test_solver.SolverRegressionTests) ... ok
+test_lunch_and_daily_limit_stay_enforced (test_solver.SolverRegressionTests) ... ok
+test_missing_rooms_is_infeasible (test_solver.SolverRegressionTests) ... ok
+test_required_lesson_has_exactly_one_room (test_solver.SolverRegressionTests) ... ok
+test_room_domain_preserves_type_and_lock_intersection (test_solver.SolverRegressionTests) ... ok
+test_room_lock_is_respected (test_solver.SolverRegressionTests) ... ok
+test_same_subject_different_teachers_cannot_share_room (test_solver.SolverRegressionTests) ... ok
+test_separate_groups_cannot_share_teacher (test_solver.SolverRegressionTests) ... ok
+test_teacher_cannot_teach_two_subjects_at_once (test_solver.SolverRegressionTests) ... ok
+test_two_lessons_cannot_use_one_room_at_once (test_solver.SolverRegressionTests) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.185s
+
+OK
+VARIABLE_GENERATION_SUMMARY
+created_vars=0
+no_slot_after_teacher_filter=1
+{'group_id': 'G0', 'subject_id': 'S0', 'teacher_id': 'T0', 'reason': 'teacher has no valid slot after day/period and blocked/reserved filtering'}
+---

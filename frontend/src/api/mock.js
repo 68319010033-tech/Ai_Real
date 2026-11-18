@@ -1,0 +1,83 @@
+// ข้อมูลจำลองเพื่อพัฒนา UI เท่านั้น ไม่ใช่ข้อมูลจริงจากกรรมการ
+// timeslot_id = (day-1)*12 + period  (ตรงกับ C10: อังคารคาบ 8 = 20, C12: พุธคาบ 8-9 = 32,33)
+const delay = (v, ms = 400) => new Promise((r) => setTimeout(() => r(v), ms))
+
+export const mockTimeslots = Array.from({ length: 60 }, (_, i) => ({
+  timeslotId: String(i + 1),
+  day: Math.floor(i / 12) + 1, // 1=จันทร์ ... 5=ศุกร์
+  period: (i % 12) + 1,
+}))
+
+export const mockEvents = [
+  { eventId: 'e1', groupIds: ['G1'], subjectId: 'S-DEMO-1', subjectName: 'วิชาตัวอย่าง 1', teacherId: 'T01', roomId: 'R0001', timeslotId: '1', component: 'theory' },
+  { eventId: 'e2', groupIds: ['G1'], subjectId: 'S-DEMO-1', subjectName: 'วิชาตัวอย่าง 1', teacherId: 'T01', roomId: 'R0002', timeslotId: '2', component: 'practice' },
+  { eventId: 'e3', groupIds: ['G3', 'G4'], sharedEventId: 'sh1', subjectId: '30000-DEMO', subjectName: 'วิชาเรียนร่วม (ตัวอย่าง)', teacherId: 'T02', roomId: 'R0001', timeslotId: '14', component: 'theory' },
+  { eventId: 'e4', groupIds: ['G1'], subjectId: 'ACT-DEMO', subjectName: 'กิจกรรม (ตัวอย่าง)', teacherId: 'T03', roomId: 'R0003', timeslotId: '32', component: 'theory' },
+]
+
+const jobs = {}
+
+const BASE_RULES = [
+  ['C01', 'จำนวนคาบรายวิชา = ทฤษฎี + ปฏิบัติ'],
+  ['C02', 'ไม่มีเรียนคาบ 5'],
+  ['C03', 'วิชาที่เรียนตรงกับที่ลงทะเบียน'],
+  ['C04', 'คาบรวมเท่ากับผลรวมวิชาลงทะเบียน'],
+  ['C05', 'เรียนไม่เกิน 10 คาบต่อวัน'],
+  ['C06', 'ครูไม่สอนชนเวลา'],
+  ['C07', 'ห้องไม่ถูกใช้ซ้อนเวลา'],
+  ['C08', 'ครูสอนเฉพาะวิชาที่กำหนด'],
+  ['C09', 'ประเภทห้องตรงกับวิชา'],
+  ['C10', 'Leader ไม่สอนช่วงประชุมอังคารคาบ 8'],
+  ['C11', 'มีโฮมรูมอย่างน้อยสัปดาห์ละ 1 คาบ'],
+  ['C12', 'วิชากิจกรรมอยู่พุธคาบ 8–9'],
+  ['C13', 'วิชา 20000/30000 เรียนร่วม 2 กลุ่ม'],
+]
+
+export const mockApi = {
+  getSchedule: () => delay({ scheduleId: 'demo', datasetVersion: 'demo', solverStatus: 'FEASIBLE', timeslots: mockTimeslots, events: mockEvents }),
+  importDataset: (files) =>
+    delay({
+      datasetVersion: 'demo-1',
+      counts: { teacher: 18, room: 22, student_group: 8, subject: 41, teach: 50, register: 65, timeslot: 60 },
+      errors: [
+        { code: 'SCHEMA_INVALID', severity: 'warning', file: files[0]?.name ?? 'room.csv', sheet: null, row: 5, column: 'room_id', message: 'ค่าเป็น placeholder (ตัวอย่างจำลอง)' },
+      ],
+    }, 800),
+
+  startSolve: () => {
+    const jobId = 'job-' + Date.now()
+    jobs[jobId] = { startedAt: Date.now(), cancelled: false }
+    return delay({ jobId }, 200)
+  },
+  getJob: (jobId) => {
+    const j = jobs[jobId]
+    const elapsed = (Date.now() - j.startedAt) / 1000
+    if (j.cancelled) return delay({ jobId, status: 'cancelled', solverStatus: null })
+    if (elapsed < 1) return delay({ jobId, status: 'queued', solverStatus: null }, 100)
+    if (elapsed < 5) return delay({ jobId, status: 'running', solverStatus: null }, 100)
+    return delay({ jobId, status: 'completed', solverStatus: 'FEASIBLE', scheduleId: 'demo' }, 100)
+  },
+  getValidation: () =>
+    delay({
+      scheduleId: 'demo',
+      // ข้อมูลจำลองเพื่อดู UI เท่านั้น
+      results: BASE_RULES.map(([ruleId, title]) => {
+        if (ruleId === 'C05')
+          return { ruleId, title, status: 'fail', violations: [{ message: '(ตัวอย่างจำลอง) มี 11 คาบในวันจันทร์', groupIds: ['G1'], timeslotId: '1' }] }
+        if (ruleId === 'C11') return { ruleId, title, status: 'unresolved', violations: [] }
+        return { ruleId, title, status: 'pass', violations: [] }
+      }),
+    }, 500),
+
+
+  cancelJob: (jobId) => {
+    jobs[jobId].cancelled = true
+    return delay({ jobId }, 100)
+  },
+  exportSchedule: async (format) => {
+    if (format !== 'csv') throw new Error('โหมดจำลองรองรับเฉพาะ CSV')
+    const rows = ['group_id,timeslot_id,subject_id,teacher_id,room_id']
+    for (const e of mockEvents) for (const g of e.groupIds) rows.push([g, e.timeslotId, e.subjectId, e.teacherId, e.roomId].join(','))
+    return delay(new Blob([rows.join('\n')], { type: 'text/csv' }), 300)
+  },
+}
