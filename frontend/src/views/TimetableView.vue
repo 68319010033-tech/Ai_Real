@@ -32,6 +32,20 @@ const options = computed(() => {
   return [...set].sort()
 })
 
+// id -> ชื่อ สำหรับตัวเลือกครู/ห้อง (ถ้าไม่มีชื่อใช้ id)
+const nameOf = computed(() => {
+  const m = { teacher: {}, room: {} }
+  for (const e of events.value) {
+    m.teacher[e.teacherId] = e.teacherName || e.teacherId
+    m.room[e.roomId] = e.roomName || e.roomId
+  }
+  return m
+})
+const labelOf = (id) => {
+  const name = mode.value === 'group' ? id : nameOf.value[mode.value]?.[id] || id
+  return name === id ? id : `${name} (${id})`
+}
+
 const current = computed(() => (options.value.includes(selected.value) ? selected.value : options.value[0] ?? ''))
 
 const cells = computed(() => {
@@ -47,6 +61,30 @@ const cells = computed(() => {
   }
   return map
 })
+
+// รวมคาบติดกันที่เป็นวิชา+ครูเดียวกัน (ไม่ข้ามพักเที่ยง) ให้เป็นช่องเดียว
+const dayRows = computed(() =>
+  DAYS.map((_, di) => {
+    const out = []
+    for (let p = 1; p <= PERIODS.length; p++) {
+      if (p === LUNCH) { out.push({ p, lunch: true, span: 1 }); continue }
+      const ev = cells.value[`${di + 1}-${p}`]
+      if (!ev) { out.push({ p, span: 1, ev: null, rooms: [] }); continue }
+      const rooms = [ev.roomName || ev.roomId]
+      let span = 1
+      while (p + span <= PERIODS.length && p + span !== LUNCH) {
+        const nx = cells.value[`${di + 1}-${p + span}`]
+        if (!nx || nx.subjectId !== ev.subjectId || nx.teacherId !== ev.teacherId) break
+        const r = nx.roomName || nx.roomId
+        if (!rooms.includes(r)) rooms.push(r)
+        span++
+      }
+      out.push({ p, span, ev, rooms })
+      p += span - 1
+    }
+    return out
+  }),
+)
 </script>
 
 <template>
@@ -68,7 +106,7 @@ const cells = computed(() => {
       </label>
       <label>
         <select v-model="selected" :aria-label="'เลือก' + mode">
-          <option v-for="o in options" :key="o" :value="o">{{ o }}</option>
+          <option v-for="o in options" :key="o" :value="o">{{ labelOf(o) }}</option>
         </select>
       </label>
       <span class="muted">สถานะ solver: {{ store.schedule.solverStatus }} · ข้อมูล: {{ store.schedule.datasetVersion }}</span>
@@ -82,15 +120,17 @@ const cells = computed(() => {
         <tbody>
           <tr v-for="(d, di) in DAYS" :key="d">
             <th scope="row">{{ d }}</th>
-            <td v-for="p in PERIODS" :key="p" :class="{ lock: p === LUNCH }">
-              <span v-if="p === LUNCH" class="muted">พักเที่ยง</span>
-              <div v-else-if="cells[`${di + 1}-${p}`]" class="ev">
-                <strong>{{ cells[`${di + 1}-${p}`].subjectName }}</strong>
-                <div>{{ cells[`${di + 1}-${p}`].teacherId }} · {{ cells[`${di + 1}-${p}`].roomId }}</div>
-                <div class="muted">{{ cells[`${di + 1}-${p}`].component }}</div>
-                <span v-if="cells[`${di + 1}-${p}`].sharedEventId" class="badge">เรียนร่วม {{ cells[`${di + 1}-${p}`].groupIds.join('+') }}</span>
-              </div>
-            </td>
+            <template v-for="c in dayRows[di]" :key="c.p">
+              <td v-if="c.lunch" class="lock"><span class="muted">พักเที่ยง</span></td>
+              <td v-else :colspan="c.span">
+                <div v-if="c.ev" class="ev">
+                  <strong>{{ c.ev.subjectName }}</strong>
+                  <div>{{ c.ev.teacherName || c.ev.teacherId }} · {{ c.rooms.join(' / ') }}</div>
+                  <div v-if="c.span > 1" class="muted">{{ c.span }} คาบ</div>
+                  <span v-if="c.ev.sharedEventId" class="badge">เรียนร่วม {{ c.ev.groupIds.join('+') }}</span>
+                </div>
+              </td>
+            </template>
           </tr>
         </tbody>
       </table>

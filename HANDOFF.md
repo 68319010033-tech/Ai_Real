@@ -1,5 +1,20 @@
 # Ai_Real continuation handoff
 
+## PR #7 merge preparation — 2026-11-18
+
+Merged current integration into the PR branch to resolve overlapping worker/validator
+changes. Preserved the teammate's timetable display improvements, teacher/room names,
+explicit registration-teacher selection, sorted solver output, and worker rule opt-out
+compatibility. Retained the async job path and explicit advisor_id policy; production
+routes use dataset.withHomeroom, not the older name-matching helper.
+
+After resolution: 49 worker tests, 29 backend tests, and frontend build pass locally.
+The 73-registration HTTP benchmark still passes C01-C13 (10.460 s wall, 1.684 s build,
+7.007 s solve, 178.797 MB combined peak upper bound; run alongside local tests).
+GitHub PR workflow for d925477 passed. New merge-resolution commit checks must pass
+before merging PR #7. Production Render deployment remains not verified.
+
+
 
 ## Latest patch — 2026-11-18 async jobs and measured room optimization
 
@@ -163,6 +178,12 @@ Operate one worker and one backend process/replica. In-memory mode cannot preser
 jobs after backend process loss; Firebase mode can. Worker TTL expiry is distinguishable
 from infeasibility but reported with restart/expired-job recovery semantics.
 
+## Latest patch — worker/validator alignment
+
+- `ai_worker/solver.py` now enforces C09 (room type from theory/practice, same predicate as validator; opt-out `enforceRoomType:false`) and C12 (activity subjects only Wed periods 8–9, others excluded there; opt-out `enforceActivitySlots:false`). One teacher per group/subject; `register.teacher_id` honoured when it is in `teach`. Output sorted.
+- C11: `backend/src/lib/homeroom.js` adds a virtual `HOMEROOM` subject (1 theory period, one per group) at solve and validate time when the CSV has none; advisor matched by teacher id/name (C19), otherwise any teacher. Disable with `AUTO_HOMEROOM=false`. Stored datasets are not modified.
+- Backend forwards `seed` to the worker in `/solve-jobs` and `/generate`.
+- Tests: 29 worker tests, 12 backend tests pass; synthetic end-to-end (backend payload -> worker -> validator) passes C01–C13.
 
 ## Latest patch — 2026-11-17 resource safeguards
 

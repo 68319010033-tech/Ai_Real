@@ -186,6 +186,58 @@ class SolverRegressionTests(unittest.TestCase):
         data['registers'][1]['group_id'] = 'G0'
         self.assertEqual(solve_timetable(data)['status'], 'INFEASIBLE')
 
+    def test_room_type_derived_from_theory_practice(self):
+        # C09: theory-only -> Theory room; subject with practice -> never Theory.
+        data = fixture(rooms=3)
+        for room, kind in zip(data['rooms'], ('Theory', 'Lab', 'Lab')):
+            room['room_type'] = kind
+        self.assertEqual(self.solve_valid(data)['schedule'][0]['room_id'], 'R0')
+        data['subjects'][0].update(theory=0, practice=1)
+        self.assertNotEqual(self.solve_valid(data)['schedule'][0]['room_id'], 'R0')
+        data['rooms'] = data['rooms'][:1]
+        self.assertEqual(solve_timetable(data)['status'], 'INFEASIBLE')
+
+    def test_room_type_can_be_disabled_and_untyped_rooms_pass(self):
+        data = fixture(rooms=1)
+        data['rooms'][0]['room_type'] = 'Lab'
+        self.assertEqual(solve_timetable(data)['status'], 'INFEASIBLE')
+        data['constraints'] = {'enforceRoomType': False}
+        self.solve_valid(data)
+
+    def activity_fixture(self):
+        data = fixture(count=2, slots=3, rooms=2)
+        data['timeslots'] = [
+            {'timeslot_id': 'A', 'day': 'Mon', 'period': 1},
+            {'timeslot_id': 'B', 'day': 'Wed', 'period': 8},
+            {'timeslot_id': 'C', 'day': 'Wed', 'period': 9},
+        ]
+        data['subjects'][0]['subject_name'] = 'กิจกรรมลูกเสือ'
+        return data
+
+    def test_activity_only_in_wednesday_8_9_and_others_excluded_there(self):
+        data = self.activity_fixture()
+        rows = {r['subject_id']: r['timeslot_id'] for r in self.solve_valid(data)['schedule']}
+        self.assertIn(rows['S0'], ('B', 'C'))
+        self.assertEqual(rows['S1'], 'A')  # non-activity can't take the activity slot
+        data['timeslots'] = data['timeslots'][1:]  # nothing left for S1
+        self.assertNotEqual(solve_timetable(data)['status'], 'SUCCESS')
+
+    def test_one_teacher_per_registration(self):
+        data = fixture(slots=2, rooms=1)
+        data['subjects'][0]['theory'] = 2
+        data['teachers'].append({'teacher_id': 'T9'})
+        data['teaches'].append({'teacher_id': 'T9', 'subject_id': 'S0'})
+        data['timeslots'][1]['period'] = 2
+        rows = self.solve_valid(data)['schedule']
+        self.assertEqual(len({r['teacher_id'] for r in rows}), 1)
+
+    def test_register_teacher_is_honoured(self):
+        data = fixture(rooms=1)
+        data['teachers'].append({'teacher_id': 'T9'})
+        data['teaches'].append({'teacher_id': 'T9', 'subject_id': 'S0'})
+        data['registers'][0]['teacher_id'] = 'T9'
+        self.assertEqual(self.solve_valid(data)['schedule'][0]['teacher_id'], 'T9')
+
 
 if __name__ == '__main__':
     unittest.main()

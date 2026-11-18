@@ -30,10 +30,20 @@ def _day_number(value):
     return _as_int(s, 0)
 
 
-def _hours(subject):
+def _theory_practice(subject):
     theory = _as_int(subject.get("theory") if subject.get("theory") is not None else subject.get("theory_hours"), 0)
     practice = _as_int(subject.get("practice") if subject.get("practice") is not None else subject.get("practice_hours"), 0)
+    return theory, practice
+
+
+def _hours(subject):
+    theory, practice = _theory_practice(subject)
     return theory + practice
+
+
+def _is_activity_slot(day, period):
+    """C12: activity subjects live in Wednesday periods 8-9 only."""
+    return day == 3 and period in (8, 9)
 
 
 def _is_activity(subject):
@@ -68,7 +78,8 @@ def _normalize_constraints(constraints):
         "reservedSlots": list(data.get("reservedSlots") or []),
         "roomLocks": list(data.get("roomLocks") or []),
         "maxPeriodsPerDay": int(data.get("maxPeriodsPerDay") or 10),
-        "roomTypeMatch": data.get("roomTypeMatch", True) is not False,
+        "roomTypeMatch": data.get("enforceRoomType", data.get("roomTypeMatch", True)) is not False,
+        "enforceActivitySlots": data.get("enforceActivitySlots") is not False,
         "jointMode": str(data.get("jointMode") or data.get("joint_mode") or "none").strip().lower(),
     }
 
@@ -259,6 +270,9 @@ def _solve_timetable(data, teacher_assignments=None):
         s = str(reg.get("subject_id"))
         sub = subject_by_id.get(s, {})
         allowed_teachers = teachers_for_subject.get(s) or ([str(reg["teacher_id"])] if reg.get("teacher_id") else [])
+        reg_teacher = str(reg.get("teacher_id") or "")
+        if reg_teacher and reg_teacher in allowed_teachers:
+            allowed_teachers = [reg_teacher]
         if teacher_assignments:
             allowed_teachers = [t for t in allowed_teachers if t == teacher_assignments.get((g, s))]
         if 'C19' in data.get('special_rules', []) and ('homeroom' in str(sub.get('subject_name', '')).lower() or 'โฮมรูม' in str(sub.get('subject_name', ''))):
@@ -300,7 +314,7 @@ def _solve_timetable(data, teacher_assignments=None):
                 period = int(slot.get("period") or 0)
                 if period == 5 or day == 0:
                     continue
-                if _is_activity(sub) != (day == 3 and period in (8, 9)):
+                if constraints["enforceActivitySlots"] and _is_activity(sub) != (day == 3 and period in (8, 9)):
                     continue
                 # C10 is shown as mandatory in the UI and checked by the
                 # backend validator. Match its case-insensitive role predicate.
@@ -480,6 +494,8 @@ def _solve_timetable(data, teacher_assignments=None):
                     "timeslot_id": slot_id,
                     "room_id": rid,
                 })
+        slot_order = {str(sl.get("timeslot_id")): i for i, sl in enumerate(timeslots)}
+        schedule.sort(key=lambda r: (r["group_id"], slot_order.get(r["timeslot_id"], 0), r["subject_id"]))
         return {
             "status": "SUCCESS",
             "solver_status": "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE",
