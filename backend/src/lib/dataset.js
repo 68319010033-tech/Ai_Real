@@ -43,7 +43,7 @@ function buildRoomLocks(tables, specialRules = []) {
     });
   };
 
-  add('C14', 'R6201', (s) => /iot/i.test(`${s.subject_id} ${s.subject_name}`));
+  add('C14', 'R6201', (s) => /iot|ไอโอที/i.test(`${s.subject_id} ${s.subject_name}`));
   add('C15', 'R6203', (s) => ['31901-2002', '31900-0004'].includes(String(s.subject_id)));
   add('C16', 'R6405', (s) => ['31901-2006', '31901-2009'].includes(String(s.subject_id)));
   add('C17', 'R6205', (s) => String(s.subject_id) === '21901-2010');
@@ -51,7 +51,25 @@ function buildRoomLocks(tables, specialRules = []) {
   return locks;
 }
 
+// Explicit synthetic homeroom augmentation; source tables are never mutated.
+function withHomeroom(tables) {
+  const copy = Object.fromEntries(Object.entries(tables).map(([k,v]) => [k,Array.isArray(v) ? v.map(r=>({...r})) : v]));
+  copy.subject ||= []; copy.register ||= []; copy.teach ||= [];
+  const existing = copy.subject.find(s => /homeroom|โฮมรูม|home\s*room/i.test(`${s.subject_id} ${s.subject_name}`));
+  const sid = existing ? String(existing.subject_id) : 'HOMEROOM';
+  if (!existing) copy.subject.push({subject_id:sid,subject_name:'Homeroom',theory:1,practice:0});
+  for (const group of rows(copy,'student_group')) {
+    const has = copy.register.some(r=>String(r.group_id)===String(group.group_id) && String(r.subject_id)===sid);
+    if (!has) copy.register.push({group_id:String(group.group_id),subject_id:sid});
+  }
+  if (!existing) for (const teacher of rows(copy,'teacher')) copy.teach.push({teacher_id:String(teacher.teacher_id),subject_id:sid});
+  return copy;
+}
+
 function buildSolverPayload(tables, specialRules = [], timeLimitSeconds = 60, constraints = {}) {
+  if (specialRules.some(rule=>!['C14','C15','C16','C17','C18','C19'].includes(rule))) {
+    throw Object.assign(new Error('Unsupported special rule. C20, C22 and C23 are not implemented.'),{code:'INVALID_INPUT'});
+  }
   const teachers = rows(tables, 'teacher').map((t) => ({
     teacher_id: String(t.teacher_id),
     teacher_name: t.teacher_name,
@@ -70,6 +88,7 @@ function buildSolverPayload(tables, specialRules = [], timeLimitSeconds = 60, co
     group_name: g.group_name,
     student_count: num(g.student_count),
     advisor: g.advisor,
+    advisor_id: g.advisor_id ? String(g.advisor_id) : undefined,
   }));
 
   const subjects = rows(tables, 'subject').map((s) => ({
@@ -80,6 +99,7 @@ function buildSolverPayload(tables, specialRules = [], timeLimitSeconds = 60, co
     theory_hours: num(s.theory),
     practice_hours: num(s.practice),
     credit: num(s.credit),
+    room_type: s.room_type,
   }));
 
   const teaches = rows(tables, 'teach').map((t) => ({
@@ -116,7 +136,7 @@ function buildSolverPayload(tables, specialRules = [], timeLimitSeconds = 60, co
       reservedSlots: Array.isArray(constraints.reservedSlots) ? constraints.reservedSlots : [],
       roomLocks: Array.isArray(constraints.roomLocks) ? constraints.roomLocks : [],
       maxPeriodsPerDay: Number(constraints.maxPeriodsPerDay) || 10,
-      roomTypeMatch: Boolean(constraints.roomTypeMatch),
+      roomTypeMatch: true,
     },
     room_locks: buildRoomLocks(tables, specialRules),
     time_limit_seconds: Number(timeLimitSeconds) || 60,
@@ -181,4 +201,4 @@ function buildScheduleView(scheduleId, solverStatus, datasetVersion, scheduleRow
   };
 }
 
-module.exports = { rows, num, dayNumber, isLeader, buildSolverPayload, buildScheduleView, buildRoomLocks };
+module.exports = { withHomeroom, rows, num, dayNumber, isLeader, buildSolverPayload, buildScheduleView, buildRoomLocks };

@@ -1,7 +1,9 @@
+import os
+from room_matching import room_unions, match_rooms
 from collections import defaultdict
 from time import perf_counter
 from ortools.sat.python import cp_model
-from runtime_config import search_workers
+from runtime_config import search_workers, configure_solver
 
 
 def _as_int(value, default=0):
@@ -39,21 +41,6 @@ def _hours(subject):
     return theory + practice
 
 
-def _room_ok_for_subject(subject, room):
-    """C09 (same predicate as backend validateSchedule): theory-only subjects
-    need a Theory room; any subject with practice must not use a Theory room.
-    Rooms without a type are never rejected."""
-    rtype = _room_type(room)
-    if not rtype:
-        return True
-    theory, practice = _theory_practice(subject)
-    if practice > 0:
-        return rtype != "theory"
-    if theory > 0:
-        return rtype == "theory"
-    return True
-
-
 def _is_activity_slot(day, period):
     """C12: activity subjects live in Wednesday periods 8-9 only."""
     return day == 3 and period in (8, 9)
@@ -74,6 +61,16 @@ def _room_type(room):
     return str(room.get("room_type") or "").strip().lower()
 
 
+def _room_ok_for_subject(room, subject):
+    explicit = str(subject.get('room_type') or '').strip().lower()
+    kind = _room_type(room)
+    if explicit:
+        return kind == explicit
+    practice = _as_int(subject.get('practice', subject.get('practice_hours')), 0)
+    theory = _as_int(subject.get('theory', subject.get('theory_hours')), 0)
+    return kind != 'theory' if practice > 0 else (not kind or kind == 'theory' or theory <= 0)
+
+
 def _normalize_constraints(constraints):
     data = constraints or {}
     return {
@@ -81,9 +78,7 @@ def _normalize_constraints(constraints):
         "reservedSlots": list(data.get("reservedSlots") or []),
         "roomLocks": list(data.get("roomLocks") or []),
         "maxPeriodsPerDay": int(data.get("maxPeriodsPerDay") or 10),
-        "roomTypeMatch": bool(data.get("roomTypeMatch") is True),
-        # C09/C12 are base rules (always on in the UI); allow explicit opt-out only.
-        "enforceRoomType": data.get("enforceRoomType") is not False,
+        "roomTypeMatch": data.get("enforceRoomType", data.get("roomTypeMatch", True)) is not False,
         "enforceActivitySlots": data.get("enforceActivitySlots") is not False,
         "jointMode": str(data.get("jointMode") or data.get("joint_mode") or "none").strip().lower(),
     }
@@ -132,6 +127,37 @@ def _summarize_rejections(stats):
 
 
 def solve_timetable(data):
+    started = perf_counter()
+    result = _dispatch_solve(data)
+    result.setdefault('logs', [])
+    result.setdefault('stats', {'variables':0, 'constraints':0, 'conflicts':0, 'branches':0,
+                                'buildTimeSec':0, 'solveTimeSec':0, 'objective':None})
+    result['stats']['wallTimeSec'] = round(perf_counter() - started, 3)
+    return result
+
+
+def _dispatch_solve(data):
+    if os.getenv('AI_TEACHER_PREASSIGN', '0') != '1':
+        return _solve_timetable(data)
+    from teacher_assignment import propose_teachers
+    started = perf_counter()
+    proposal = propose_teachers(data)
+    if proposal:
+        trial = dict(data, time_limit_seconds=min(10, float(data.get('time_limit_seconds', 60)) / 3))
+        result = _solve_timetable(trial, proposal)
+        if result['status'] == 'SUCCESS':
+            result['stats']['teacherPreassignment'] = True
+            return result
+    remaining = float(data.get('time_limit_seconds', 60)) - (perf_counter() - started)
+    if remaining <= 0:
+        return {'status':'UNKNOWN', 'solver_status':'UNKNOWN', 'schedule':[],
+                'reason':'Time limit reached before full-model teacher fallback; not proof of infeasibility'}
+    result = _solve_timetable(dict(data, time_limit_seconds=remaining))
+    result.setdefault('stats', {})['teacherFallback'] = True
+    return result
+
+
+def _solve_timetable(data, teacher_assignments=None):
     started = perf_counter()
     raw_constraints = data.get("constraints") or {}
     constraints = _normalize_constraints(raw_constraints)
@@ -203,15 +229,14 @@ def solve_timetable(data):
         allowed = list(rooms)
         if locked_rooms.get(sid):
             allowed = [r for r in rooms if str(r.get("room_id")) in locked_rooms[sid]]
-        subject_room_type = str(sub.get("room_type") or "").strip().lower()
-        if constraints.get("roomTypeMatch") and subject_room_type:
-            allowed = [r for r in allowed if _room_type(r) == subject_room_type]
-        elif constraints.get("enforceRoomType"):
-            allowed = [r for r in allowed if _room_ok_for_subject(sub, r)]
+        if constraints.get("roomTypeMatch"):
+            allowed = [r for r in allowed if _room_ok_for_subject(r, sub)]
         room_options_by_subject[sid] = allowed
 
-    activity_ids = {sid for sid, sub in subject_by_id.items() if _is_activity(sub)} \
-        if constraints.get("enforceActivitySlots") else set()
+    unions = room_unions([{str(r['room_id']) for r in options} for options in room_options_by_subject.values()])
+    matching_rooms = os.getenv('AI_ROOM_MODEL', 'matching') != 'classic' and unions is not None
+    event_domains = {}
+    events_by_slot = defaultdict(list)
 
     reserved_by_subject = defaultdict(list)
     for rule in constraints.get("reservedSlots") or []:
@@ -233,6 +258,8 @@ def solve_timetable(data):
     teacher_slots = defaultdict(list)
     room_slots = defaultdict(list)
     registration_vars = defaultdict(list)
+    registration_teachers = defaultdict(lambda: defaultdict(list))
+    assumption_labels = {}
     group_slots = defaultdict(list)
     group_days = defaultdict(list)
     slot_days = {str(slot.get("timeslot_id")): _day_number(slot.get("day")) for slot in timeslots}
@@ -243,9 +270,18 @@ def solve_timetable(data):
         s = str(reg.get("subject_id"))
         sub = subject_by_id.get(s, {})
         allowed_teachers = teachers_for_subject.get(s) or ([str(reg["teacher_id"])] if reg.get("teacher_id") else [])
-        reg_teacher = str(reg["teacher_id"]) if reg.get("teacher_id") else ""
+        reg_teacher = str(reg.get("teacher_id") or "")
         if reg_teacher and reg_teacher in allowed_teachers:
-            allowed_teachers = [reg_teacher]  # register names the teacher explicitly
+            allowed_teachers = [reg_teacher]
+        if teacher_assignments:
+            allowed_teachers = [t for t in allowed_teachers if t == teacher_assignments.get((g, s))]
+        if 'C19' in data.get('special_rules', []) and ('homeroom' in str(sub.get('subject_name', '')).lower() or 'โฮมรูม' in str(sub.get('subject_name', ''))):
+            group = next((row for row in groups if str(row.get('group_id')) == g), {})
+            advisor = str(group.get('advisor_id') or '')
+            if not advisor or advisor not in teacher_by_id:
+                return {'status':'MODEL_INVALID','solver_status':'MODEL_INVALID','schedule':[],
+                        'reason':f'C19 requires an explicit valid advisor_id for group {g}'}
+            allowed_teachers = [advisor] if advisor in allowed_teachers else []
         if not allowed_teachers:
             rejection_stats["no_teacher_in_teach"].append({"group_id": g, "subject_id": s, "reason": "no teacher in teach"})
             continue
@@ -278,16 +314,12 @@ def solve_timetable(data):
                 period = int(slot.get("period") or 0)
                 if period == 5 or day == 0:
                     continue
+                if constraints["enforceActivitySlots"] and _is_activity(sub) != (day == 3 and period in (8, 9)):
+                    continue
                 # C10 is shown as mandatory in the UI and checked by the
                 # backend validator. Match its case-insensitive role predicate.
                 if "leader" in str(t_info.get("role") or "").lower() and day == 2 and period == 8:
                     continue
-                in_activity_slot = _is_activity_slot(day, period)
-                if activity_ids:
-                    if s in activity_ids and not in_activity_slot:
-                        continue
-                    if s not in activity_ids and in_activity_slot:
-                        continue
                 blocked_here = False
                 for rule in constraints.get("blockedSlots") or []:
                     if not rule.get("enabled", True):
@@ -323,9 +355,10 @@ def solve_timetable(data):
                 key = (g, s, tid, slot_id)
                 if key in candidate_vars:
                     continue
-                var = model.NewBoolVar(f"x_{g}_{s}_{tid}_{slot_id}")
+                var = model.NewBoolVar(f"x_{g}_{s}_{tid}_{slot_id}" if os.getenv("AI_DEBUG_NAMES") == "1" else "")
                 candidate_vars[key] = var
                 registration_vars[(g, s)].append(var)
+                registration_teachers[(g, s)][tid].append(var)
                 group_slots[(g, slot_id)].append(var)
                 group_days[(g, slot_days[slot_id])].append(var)
 
@@ -335,43 +368,31 @@ def solve_timetable(data):
                 assignment_events[key] = busy_key
                 if busy_key not in busy_vars:
                     busy_vars[busy_key] = (
-                        model.NewBoolVar(f"busy_{busy_key}") if isinstance(event_group, tuple) else var
+                        model.NewBoolVar(f"busy_{busy_key}" if os.getenv("AI_DEBUG_NAMES") == "1" else "") if isinstance(event_group, tuple) else var
                     )
                     teacher_slots[(tid, slot_id)].append(busy_vars[busy_key])
                     allowed_rooms = {room_numbers[str(room.get("room_id"))]
                                      for room in room_options_by_subject.get(s, rooms)}
-                    # Inactive events get distinct negative sentinels. Active
-                    # events choose one real room; AllDifferent prevents overlap.
-                    inactive_room = -(len(event_rooms) + 1)
-                    room_var = model.NewIntVarFromDomain(
-                        cp_model.Domain.FromValues(sorted(allowed_rooms | {inactive_room})),
-                        f"event_room_{busy_key}",
-                    )
-                    model.Add(room_var == inactive_room).OnlyEnforceIf(busy_vars[busy_key].Not())
-                    model.Add(room_var != inactive_room).OnlyEnforceIf(busy_vars[busy_key])
-                    event_rooms[busy_key] = room_var
-                    room_slots[slot_id].append(room_var)
+                    event_domains[busy_key] = allowed_rooms
+                    events_by_slot[slot_id].append(busy_key)
+                    if not matching_rooms:
+                        # Inactive events get distinct negative sentinels. Active
+                        # events choose one real room; AllDifferent prevents overlap.
+                        inactive_room = -(len(event_rooms) + 1)
+                        room_var = model.NewIntVarFromDomain(
+                            cp_model.Domain.FromValues(sorted(allowed_rooms | {inactive_room})),
+                            f"event_room_{busy_key}" if os.getenv("AI_DEBUG_NAMES") == "1" else "",
+                        )
+                        model.Add(room_var == inactive_room).OnlyEnforceIf(busy_vars[busy_key].Not())
+                        model.Add(room_var != inactive_room).OnlyEnforceIf(busy_vars[busy_key])
+                        event_rooms[busy_key] = room_var
+                        room_slots[slot_id].append(room_var)
                 event_assignments[busy_key].append(var)
 
     if not candidate_vars:
-        print("VARIABLE_GENERATION_SUMMARY")
-        print("created_vars=0")
-        for key, items in rejection_stats.items():
-            print(f"{key}={len(items)}")
-            for item in items[:5]:
-                print(item)
-        print("---")
-        return {
-            "status": "MODEL_INVALID",
-            "solver_status": "MODEL_INVALID",
-            "schedule": [],
-            "runtime_seconds": round(perf_counter() - started, 3),
-            "reason": "no assignment variables created; rejects: " + "; ".join(f"{k}={len(v)}" for k, v in rejection_stats.items()),
-            "debug": {
-                "variable_generation": {k: len(v) for k, v in rejection_stats.items()},
-                "examples": {k: v[:5] for k, v in rejection_stats.items() if v},
-            },
-        }
+        return {"status": "INFEASIBLE", "solver_status": "INFEASIBLE", "schedule": [],
+                "reason": "No eligible teacher/time assignments remain after mandatory and selected rules.",
+                "infeasibleRules": [{"ruleId":"C01", "message":key, "count":len(items)} for key,items in rejection_stats.items()]}
 
     for busy_key, busy_var in busy_vars.items():
         if isinstance(busy_key[0], tuple):
@@ -380,27 +401,25 @@ def solve_timetable(data):
     for busy_for_slot in teacher_slots.values():
         model.Add(sum(busy_for_slot) <= 1)
 
-    teacher_choice = {}
-    for (g, s, tid, _slot), var in candidate_vars.items():
-        pick = teacher_choice.get((g, s, tid))
-        if pick is None:
-            pick = teacher_choice[(g, s, tid)] = model.NewBoolVar(f"teacher_{g}_{s}_{tid}")
-        model.AddImplication(var, pick)
-    picks_by_reg = defaultdict(list)
-    for (g, s, tid), pick in teacher_choice.items():
-        picks_by_reg[(g, s)].append(pick)
-    for picks in picks_by_reg.values():
-        model.Add(sum(picks) == 1)  # one teacher per group/subject for the whole week
-
     for reg in registers:
         g = str(reg.get("group_id"))
         s = str(reg.get("subject_id"))
         total_hours = _hours(subject_by_id.get(s, {}))
         vars_for_reg = registration_vars[(g, s)]
         if vars_for_reg:
-            model.Add(sum(vars_for_reg) == total_hours)
+            assumption = model.NewBoolVar('')
+            model.AddAssumption(assumption)
+            assumption_labels[assumption.Index()] = {"ruleId":"C01", "groupId":g, "subjectId":s,
+                "message":f"Required hours for {g}/{s} conflict with teacher/room/time availability or other registrations"}
+            model.Add(sum(vars_for_reg) == total_hours).OnlyEnforceIf(assumption)
+            selectors = []
+            for tid, choices in registration_teachers[(g, s)].items():
+                selected = model.NewBoolVar('')
+                selectors.append(selected)
+                model.Add(sum(choices) == total_hours * selected)
+            model.Add(sum(selectors) <= 1)
         elif total_hours > 0:
-            return {"status": "MODEL_INVALID", "solver_status": "MODEL_INVALID", "schedule": [], "runtime_seconds": round(perf_counter() - started, 3), "reason": f"no valid variable set for {g}/{s}"}
+            return {"status": "INFEASIBLE", "solver_status": "INFEASIBLE", "schedule": [], "runtime_seconds": round(perf_counter() - started, 3), "reason": f"No eligible teacher/time assignments for {g}/{s} after mandatory and selected rules", "infeasibleRules":[{"ruleId":"C01","groupId":g,"subjectId":s}]}
 
     for slot_vars in group_slots.values():
         model.Add(sum(slot_vars) <= 1)
@@ -413,13 +432,25 @@ def solve_timetable(data):
             for g in joint_sets[(sid, event_group)]:
                 model.Add(candidate_vars.get((g, sid, tid, slot_id), 0) == busy_var)
 
+    if matching_rooms:
+        numbered_unions = [{room_numbers[r] for r in union} for union in unions]
+        for events in events_by_slot.values():
+            for union in numbered_unions:
+                constrained = [busy_vars[e] for e in events if event_domains[e] <= union]
+                if constrained:
+                    model.Add(sum(constrained) <= len(union))
+
     for choices in room_slots.values():
         model.AddAllDifferent(choices)
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = max(5.0, min(120.0, time_limit))
+    solver.parameters.max_time_in_seconds = max(0.01, min(120.0, time_limit))
     solver.parameters.num_search_workers = search_workers()
     solver.parameters.random_seed = _as_int(data.get("seed"), 1)
+    profile = configure_solver(solver.parameters)
+    import gc
+    del event_assignments, registration_vars, registration_teachers, group_slots, group_days, teacher_slots
+    gc.collect()
     build_seconds = perf_counter() - started
     status = solver.Solve(model)
     elapsed = perf_counter() - started
@@ -432,6 +463,7 @@ def solve_timetable(data):
         "buildTimeSec": round(build_seconds, 3),
         "solveTimeSec": round(solver.WallTime(), 3),
         "searchWorkers": solver.parameters.num_search_workers,
+        "profile": profile,
         "objective": None,
     }
     logs = [
@@ -440,11 +472,20 @@ def solve_timetable(data):
     ]
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        assigned_rooms = {}
+        if matching_rooms:
+            for events in events_by_slot.values():
+                matching = match_rooms({e: event_domains[e] for e in events if solver.Value(busy_vars[e])})
+                if matching is None:
+                    # Hall constraints make this unreachable; never return an invalid SUCCESS.
+                    return {"status": "MODEL_INVALID", "solver_status": "MODEL_INVALID", "schedule": [],
+                            "reason": "Room matching invariant failed", "stats": stats, "logs": logs}
+                assigned_rooms.update(matching)
         schedule = []
         for key, var in candidate_vars.items():
             if solver.Value(var):
                 g, s, tid, slot_id = key
-                room_number = solver.Value(event_rooms[assignment_events[key]])
+                room_number = assigned_rooms[assignment_events[key]] if matching_rooms else solver.Value(event_rooms[assignment_events[key]])
                 rid = room_ids[room_number - 1]
                 schedule.append({
                     "group_id": g,
@@ -469,5 +510,6 @@ def solve_timetable(data):
         return {"status": "UNKNOWN", "solver_status": "UNKNOWN", "schedule": [], "runtime_seconds": round(elapsed, 3), "reason": "time limit reached", "variables": len(candidate_vars), "logs": logs, "stats": stats}
 
     final_status = "MODEL_INVALID" if status == cp_model.MODEL_INVALID else "INFEASIBLE"
-    reason = model.Validate() if status == cp_model.MODEL_INVALID else "No solution satisfies the current model; conflicting rules have not been isolated."
-    return {"status": final_status, "solver_status": final_status, "schedule": [], "runtime_seconds": round(elapsed, 3), "reason": reason, "variables": len(candidate_vars), "logs": logs, "stats": stats}
+    core = [assumption_labels[i] for i in solver.SufficientAssumptionsForInfeasibility() if i in assumption_labels] if status == cp_model.INFEASIBLE else []
+    reason = model.Validate() if status == cp_model.MODEL_INVALID else "Required registrations conflict with teacher, room or permitted slot capacity; see infeasibleRules (sufficient conflict set, not necessarily minimal)."
+    return {"status": final_status, "solver_status": final_status, "schedule": [], "runtime_seconds": round(elapsed, 3), "reason": reason, "infeasibleRules": core, "variables": len(candidate_vars), "logs": logs, "stats": stats}

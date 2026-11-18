@@ -1,13 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
+const { WorkerClient } = require('../lib/workerClient');
+const { JobStore, TERMINAL } = require('../lib/jobStore');
 const { aiError } = require('../lib/aiErrors');
 const multer = require('multer');
 const { db } = require('../config/firebase');
 const { parseCsv, tableNameFromFile } = require('../lib/csv');
-const { buildSolverPayload, buildScheduleView } = require('../lib/dataset');
+const { buildSolverPayload, buildScheduleView, withHomeroom } = require('../lib/dataset');
 const { validateSchedule } = require('../lib/validateSchedule');
-const { withHomeroom } = require('../lib/homeroom');
 const verifyToken = require('../middleware/auth');
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -21,6 +22,30 @@ const memory = {
   jobs: new Map(),
   datasets: new Map(),
 };
+
+const jobStore = new JobStore(db, {ttlMs:Number(process.env.AI_BACKEND_JOB_TTL_SECONDS || 86400)*1000,
+  cap:Number(process.env.AI_BACKEND_JOB_CAP || 200)});
+memory.jobs = jobStore.jobs;
+const controllers = new Map();
+const admissions = new Set();
+const worker = new WorkerClient(axios, AI_WORKER_URL, {
+  wakeTimeout:Number(process.env.AI_WAKE_TIMEOUT_MS || 90000),
+  totalMs:Number(process.env.AI_JOB_WAIT_MS || 900000),
+});
+const ready = jobStore.load().then(jobs => { for (const job of jobs) setImmediate(() => executeJob(job.jobId).catch(() => console.error('AI job recovery execution failed'))); });
+ready.catch(() => console.error('AI job recovery failed; refusing new jobs until persistence is available'));
+const cleanupTimer = setInterval(() => {
+  jobStore.cleanup().catch(() => console.error('AI job cleanup failed'));
+  for (const [uid,schedule] of memory.latestByUid) {
+    if(Date.now()-Date.parse(schedule.updatedAt)>jobStore.ttlMs) memory.latestByUid.delete(uid);
+  }
+},60000);
+cleanupTimer.unref();
+if (Number(process.env.AI_KEEP_WARM_SECONDS || 0) > 0) {
+  const timer = setInterval(() => worker.request('get','/health').catch(() => {}),
+    Math.max(60,Number(process.env.AI_KEEP_WARM_SECONDS))*1000);
+  timer.unref();
+}
 
 function isSafeKey(value, label) {
   if (typeof value !== 'string') return false;
@@ -251,7 +276,9 @@ function getLatestScheduleForUid(uid) {
 
 function setLatestScheduleForUid(uid, schedule) {
   if (!uid || !schedule) return;
+  memory.latestByUid.delete(uid);
   memory.latestByUid.set(uid, schedule);
+  while (memory.latestByUid.size > jobStore.cap) memory.latestByUid.delete(memory.latestByUid.keys().next().value);
 }
 
 async function resolveUserDataset(uid, datasetVersion, providedTables) {
@@ -285,13 +312,6 @@ async function resolveUserSchedule(uid, scheduleId) {
   if (fromFirebase) return fromFirebase;
 
   return null;
-}
-
-async function runAiSolve(payload, timeoutMs) {
-  const response = await axios.post(`${AI_WORKER_URL}/solve`, payload, {
-    timeout: timeoutMs,
-  });
-  return response.data;
 }
 
 function getStoredSchedule(uid, scheduleId) {
@@ -369,7 +389,7 @@ router.post('/datasets/import', verifyToken, upload.array('files', 20), async (r
   }
 });
 
-router.post('/solve-jobs', verifyToken, async (req, res) => {
+router.post(['/solve-jobs', '/generate'], verifyToken, async (req, res) => {
   const uid = getUserUid(req);
   const body = req.body || {};
   const jobId = makeJobId();
@@ -378,6 +398,13 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
     return res.status(401).json({ error: 'Unauthorized: missing user context' });
   }
 
+  await ready;
+  await jobStore.cleanup();
+  const active = jobStore.activeFor(uid);
+  if (active || admissions.has(uid)) return res.status(409).json({error:'You already have an active AI job.',jobId:active?.jobId});
+  if (memory.jobs.size + admissions.size >= jobStore.cap) return res.status(429).json({error:'Job storage is full; retry after retained jobs expire.'});
+  admissions.add(uid);
+  try {
   let datasetVersion;
   try {
     const rawDatasetVersion = body.datasetVersion ?? 'local';
@@ -388,34 +415,42 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
 
   const providedTables = body.tables && typeof body.tables === 'object' ? body.tables : null;
   const resolvedDataset = await resolveUserDataset(uid, datasetVersion, providedTables);
-  const tables = resolvedDataset?.tables || providedTables;
+  const rawTables = resolvedDataset?.tables || providedTables;
+  const tables = rawTables ? withHomeroom(rawTables) : null;
 
   if (!tables) {
     return res.status(400).json({ error: 'ไม่พบชุดข้อมูล กรุณาอัปโหลดและตรวจไฟล์ก่อนจัดตาราง' });
   }
 
+  const limit = Number(body.timeLimitSeconds ?? 60);
+  if (!Number.isFinite(limit) || limit <= 0 || limit > 120 || !Number.isInteger(Number(body.seed ?? 1)) || Number(body.seed ?? 1)<0 || Number(body.seed ?? 1)>2147483647) {
+    return res.status(400).json({error:'timeLimitSeconds must be in (0,120]; seed must be an integer in [0,2147483647].',code:'INVALID_INPUT'});
+  }
+  const errors = datasetErrors(tables);
+  if(errors.length) return res.status(400).json({error:'Missing required dataset tables',code:'INVALID_INPUT',errors});
   const job = {
     jobId,
     uid,
     status: 'queued',
     solverStatus: 'QUEUED',
     datasetVersion,
-    timeLimitSeconds: Number(body.timeLimitSeconds || 30),
-    seed: Number(body.seed || 1),
+    timeLimitSeconds: Number(body.timeLimitSeconds ?? 60),
+    seed: Number(body.seed ?? 1),
+    autoResubmit: body.autoResubmit !== false,
     specialRules: Array.isArray(body.specialRules) ? body.specialRules : [],
     constraints: body.constraints || {
       blockedSlots: [],
       reservedSlots: [],
       roomLocks: [],
       maxPeriodsPerDay: 10,
-      roomTypeMatch: false,
+      roomTypeMatch: true,
     },
     tables,
     createdAt: new Date().toISOString(),
   };
 
-  memory.jobs.set(jobId, job);
-  res.json({
+  await jobStore.save(job);
+  res.status(202).json({
     jobId,
     status: 'queued',
     solverStatus: 'QUEUED',
@@ -423,22 +458,31 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
     stats: { variables: 0, constraints: 0, conflicts: 0, branches: 0, wallTimeSec: 0, objective: null },
   });
 
-  setImmediate(async () => {
+  setImmediate(() => executeJob(jobId).catch(() => console.error('AI job execution/persistence failed')));
+  } finally {
+    admissions.delete(uid);
+  }
+});
+
+async function executeJob(jobId) {
     const current = memory.jobs.get(jobId);
     if (!current || current.status === 'cancelled') return;
 
-    current.status = 'running';
-    current.solverStatus = 'RUNNING';
-    memory.jobs.set(jobId, current);
+    const uid = current.uid;
+    const controller = new AbortController();
+    controllers.set(jobId,controller);
 
     try {
-      const solveTables = withHomeroom(current.tables);
-      const payload = buildSolverPayload(solveTables, current.specialRules, current.timeLimitSeconds, current.constraints || {});
-      payload.seed = Number.isFinite(current.seed) ? current.seed : 1;
-      const timeoutMs = Math.max(45000, (current.timeLimitSeconds + 20) * 1000);
+      const payload = buildSolverPayload(current.tables, current.specialRules, current.timeLimitSeconds, current.constraints || {});
+      payload.seed = current.seed;
       let result;
       try {
-        result = await runAiSolve(payload, timeoutMs);
+        result = await worker.solve(payload,current,async patch => {
+          if (controller.signal.aborted) return;
+          Object.assign(current,patch);
+          if (patch.status) current.solverStatus=patch.status.toUpperCase();
+          await jobStore.save(current);
+        },controller.signal);
       } catch (error) {
         const detail = error?.response?.data;
         if (detail?.status === 'INFEASIBLE') {
@@ -448,7 +492,7 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
           current.completedAt = new Date().toISOString();
           current.logs = detail?.logs || [];
           current.stats = detail?.stats || { variables: 0, constraints: 0, conflicts: 0, branches: 0, wallTimeSec: 0, objective: null };
-          memory.jobs.set(jobId, current);
+          await jobStore.save(current);
           return;
         }
         throw error;
@@ -463,13 +507,17 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
           result.solver_status || 'FEASIBLE',
           current.datasetVersion,
           result.schedule || [],
-          solveTables,
+          current.tables,
         );
         schedule.uid = uid;
         schedule.scheduleId = scheduleId;
         schedule.datasetVersion = current.datasetVersion;
         schedule.specialRules = current.specialRules;
         schedule.constraints = payload.constraints;
+        schedule.withHomeroom = true;
+        const validation = validateSchedule(schedule,current.tables,current.specialRules);
+        const failed = validation.results.filter(rule=>rule.status==='fail');
+        if (failed.length) throw Object.assign(new Error('Generated timetable failed validation: '+failed.map(r=>r.ruleId).join(', ')),{code:'VALIDATION_FAILED'});
 
         current.status = 'completed';
         current.solverStatus = schedule.solverStatus;
@@ -479,42 +527,47 @@ router.post('/solve-jobs', verifyToken, async (req, res) => {
         current.stats = result.stats || { variables: 0, constraints: 0, conflicts: 0, branches: 0, wallTimeSec: 0, objective: null };
         current.completedAt = new Date().toISOString();
         setLatestScheduleForUid(uid, schedule);
-        memory.jobs.set(jobId, current);
+        await jobStore.save(current);
 
         try {
-          await saveScheduleToFirebase(uid, schedule);
+          if (db) await saveScheduleToFirebase(uid, schedule);
         } catch (error) {
           current.error = error.message;
           current.status = 'failed';
           current.solverStatus = 'FAILED';
-          memory.jobs.set(jobId, current);
+          await jobStore.save(current);
         }
         return;
       }
 
-      current.status = 'completed';
-      current.solverStatus = result.solver_status || result.status || 'INFEASIBLE';
+      current.status = ['INFEASIBLE','UNKNOWN'].includes(result.status) ? 'completed' : 'failed';
+      current.solverStatus = result.solver_status || result.status || 'FAILED';
+      current.infeasibleRules = result.infeasibleRules || [];
+      current.errorCode = result.status === 'UNKNOWN' ? 'TIME_LIMIT' : result.status === 'MODEL_INVALID' ? 'INVALID_INPUT' : result.status;
       current.error = result.reason || result.detail || 'ไม่พบตารางที่ตรงเงื่อนไขทั้งหมด';
       current.logs = Array.isArray(result.logs) ? result.logs : [];
       current.stats = result.stats || { variables: 0, constraints: 0, conflicts: 0, branches: 0, wallTimeSec: 0, objective: null };
       current.completedAt = new Date().toISOString();
-      memory.jobs.set(jobId, current);
+      await jobStore.save(current);
     } catch (error) {
       if (current.status === 'cancelled') return;
       current.status = 'failed';
       current.solverStatus = 'FAILED';
       const failure = aiError(error);
       current.error = failure.message;
+      current.errorCode = failure.code;
       current.completedAt = new Date().toISOString();
       current.logs = [{ level: 'error', stage: 'ai_request', message: failure.message, code: failure.code }];
       console.error('AI request failed:', { jobId, code: failure.code, httpStatus: error?.response?.status || null });
       current.stats = { variables: 0, constraints: 0, conflicts: 0, branches: 0, wallTimeSec: 0, objective: null };
-      memory.jobs.set(jobId, current);
+      await jobStore.save(current);
+    } finally {
+      controllers.delete(jobId);
     }
-  });
-});
+}
 
 router.get('/solve-jobs/:jobId', verifyToken, async (req, res) => {
+  await ready;
   const uid = getUserUid(req);
   const job = [...memory.jobs.values()].find((candidate) => candidate.jobId === req.params.jobId && candidate.uid === uid);
   if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -529,17 +582,27 @@ router.get('/solve-jobs/:jobId', verifyToken, async (req, res) => {
     infeasibleRules: job.infeasibleRules || [],
     error: job.error || null,
     datasetVersion: job.datasetVersion,
+    queuePosition:job.queuePosition || 0, elapsedSeconds:job.elapsedSeconds || 0,
+    message:job.message || null, errorCode:job.errorCode || null, restartHistory:job.restartHistory || [],
   });
 });
 
 router.post('/solve-jobs/:jobId/cancel', verifyToken, async (req, res) => {
+  await ready;
   const uid = getUserUid(req);
   const job = [...memory.jobs.values()].find((candidate) => candidate.jobId === req.params.jobId && candidate.uid === uid);
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
+  if (TERMINAL.has(job.status)) return res.json({jobId:job.jobId,status:job.status});
+  controllers.get(job.jobId)?.abort();
   job.status = 'cancelled';
   job.solverStatus = 'CANCELLED';
-  memory.jobs.set(job.jobId, job);
+  await jobStore.save(job);
+  worker.cancel(job).catch(async () => {
+    job.error = 'Cancellation saved; worker cancellation could not be confirmed. Its hard limit will stop the solve.';
+    job.errorCode = 'CANCEL_UNCONFIRMED';
+    await jobStore.save(job);
+  }).catch(() => console.error('Cancellation persistence failed'));
   return res.json({ jobId: job.jobId, status: 'cancelled' });
 });
 
@@ -578,52 +641,10 @@ router.post('/schedules/:id/validate', verifyToken, async (req, res) => {
   if (!schedule) return res.status(404).json({ error: 'Schedule not found' });
 
   const datasetRecord = await resolveUserDataset(uid, schedule.datasetVersion, null);
-  const tables = datasetRecord?.tables ? withHomeroom(datasetRecord.tables) : null;
+  const tables = datasetRecord?.tables ? (schedule.withHomeroom ? withHomeroom(datasetRecord.tables) : datasetRecord.tables) : null;
   if (!tables) return res.status(400).json({ error: 'ไม่พบชุดข้อมูลที่ใช้สร้างตารางนี้' });
 
   return res.json(validateSchedule(schedule, tables, schedule.specialRules || []));
-});
-
-router.post('/generate', verifyToken, async (req, res) => {
-  const uid = getUserUid(req);
-  const body = req.body || {};
-  let datasetVersion;
-  try {
-    datasetVersion = normalizeDatasetVersion(body.datasetVersion || 'local');
-  } catch (error) {
-    return res.status(400).json({ error: error.message });
-  }
-
-  const resolved = await resolveUserDataset(uid, datasetVersion, body.tables || null);
-  const tables = resolved?.tables || body.tables || null;
-
-  if (!tables) return res.status(400).json({ error: 'ไม่พบชุดข้อมูล' });
-
-  try {
-    const solveTables = withHomeroom(tables);
-    const payload = buildSolverPayload(solveTables, body.specialRules || [], body.timeLimitSeconds || 60);
-    payload.seed = Number(body.seed) || 1;
-    const result = await runAiSolve(payload, 80000);
-    if (result.status !== 'SUCCESS') {
-      return res.status(422).json({ error: 'Unable to solve schedule with given constraints' });
-    }
-    const scheduleId = makeScheduleId();
-    const schedule = buildScheduleView(scheduleId, 'FEASIBLE', datasetVersion, result.schedule || [], solveTables);
-    schedule.constraints = payload.constraints;
-    schedule.uid = uid;
-    schedule.scheduleId = scheduleId;
-    schedule.datasetVersion = datasetVersion;
-    setLatestScheduleForUid(uid, schedule);
-    try {
-      await saveScheduleToFirebase(uid, schedule);
-      return res.json({ message: 'Schedule generated successfully', count: (result.schedule || []).length, scheduleId });
-    } catch (error) {
-      return res.status(500).json({ error: error.message || 'Schedule save failed' });
-    }
-  } catch (error) {
-    console.error('Error solving schedule:', error?.response?.data || error?.message);
-    return res.status(500).json({ error: 'Failed to process schedule', details: error?.response?.data || error?.message });
-  }
 });
 
 router.get('/latest', verifyToken, async (req, res) => {

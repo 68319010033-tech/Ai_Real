@@ -1,5 +1,183 @@
 # Ai_Real continuation handoff
 
+## PR #7 merge preparation — 2026-11-18
+
+Merged current integration into the PR branch to resolve overlapping worker/validator
+changes. Preserved the teammate's timetable display improvements, teacher/room names,
+explicit registration-teacher selection, sorted solver output, and worker rule opt-out
+compatibility. Retained the async job path and explicit advisor_id policy; production
+routes use dataset.withHomeroom, not the older name-matching helper.
+
+After resolution: 49 worker tests, 29 backend tests, and frontend build pass locally.
+The 73-registration HTTP benchmark still passes C01-C13 (10.460 s wall, 1.684 s build,
+7.007 s solve, 178.797 MB combined peak upper bound; run alongside local tests).
+GitHub PR workflow for d925477 passed. New merge-resolution commit checks must pass
+before merging PR #7. Production Render deployment remains not verified.
+
+
+
+## Latest patch — 2026-11-18 async jobs and measured room optimization
+
+Current branch: `codex/reliable-timetable-jobs`. This section supersedes older claims
+about missing activity/homeroom/room-type enforcement. The user requested a fresh
+branch, no pushes to integration, no credential reading/printing, measured changes,
+and explicit unverified items. No credentials or private CSV/timetable data were
+read from credential files or added to source control. The supplied CSV archive was
+read only for local computation; benchmarks print aggregates only.
+
+The owner confirmed that only the AI deployment belongs to them; frontend/backend
+belong to their friend. Render returned `null` services in the confirmed workspace.
+The supplied project dashboard opened a sign-in screen. The user then explicitly
+said **“Leave it I Do This Myself”**: deployment is left to the user, no service was
+deployed or reconfigured, and no teammate was contacted.
+
+### Implemented
+
+- FastAPI async job API with required idempotency key, payload fingerprint conflicts,
+  one spawned child at a time, four queued jobs, progress/elapsed/queue position,
+  bounded logs/results/TTL, cancellation including pre-submit tombstones, boot IDs,
+  cheap HEAD/root/health/favicon, byte/count/schema caps, structured request-ID logs.
+- Per-child wall timeout, sampled RSS kill, POSIX hard virtual address-space cap;
+  web process never imports OR-Tools. Results preserve solver status and stats.
+  `/solve` and `/cancel` remain available on the same queue/core. Docker uses one
+  Uvicorn process, PORT, bounded graceful shutdown and numeric-library thread limits.
+- Backend short polling, bounded exponential transient retries, wake-up state,
+  request IDs, one active job per user (409), abort + worker cancellation, restart
+  detection and one automatic resubmission with failed-attempt history. Results are
+  validated before publication. Explicit error classes distinguish infrastructure,
+  invalid input, queue/wake, time limit, and proven infeasibility.
+- Firebase job persistence using existing configuration, startup recovery, serialized
+  writes, bounded job/log/latest-result retention; in-memory fallback without Firebase.
+  `/generate` is now an async alias of `/solve-jobs`, returning 202/jobId; callers must
+  poll. This backend route migration does not change worker `/solve` compatibility.
+- Frontend shows wake/queue/elapsed/error/restart status, polls at 2.5 s, attaches to
+  existing job on 409, and displays friendly gateway/network messages. Search default
+  is now 60 seconds. C20/C22/C23 are hidden and rejected rather than silently ignored.
+- Exact Hall-capacity constraints replace integer room variables for ordinary room
+  domains. Deterministic bipartite matching assigns rooms afterwards. All unions of
+  distinct allowed-room sets are constrained, so this is exact, not a heuristic
+  room-class approximation. If union closure exceeds 128 sets, use the original
+  integer-room model. No no-good loop is necessary with complete Hall constraints;
+  an unexpected matching invariant failure returns MODEL_INVALID, never SUCCESS.
+- Mandatory activity slots, whole-subject C09 room rules, one teacher per registration,
+  and non-mutating `withHomeroom` augmentation now produce C01-C13 passing real output.
+  Approved joint pairs remain unchanged. C19 uses explicit optional `advisor_id`;
+  selecting it without valid mapping fails clearly, never invents a name match.
+- Owner answered “Find Yourself suitable” on C14. Read the four supplied subject names:
+  all explicitly contain Thai ไอโอที. Extended the existing name predicate to
+  `/iot|ไอโอที/i` in builder and validator, covering 31901-2013, 20901-2406,
+  20901-2407, 20901-9203 without inferring from IDs alone.
+- Infeasible models return a sufficient registration conflict set with IDs and reason
+  (not claimed minimal); no eligible slot/teacher produces a specific reason. Solver
+  UNKNOWN remains a time limit, not INFEASIBLE. Malformed references are invalid input.
+- Optional deterministic teacher pre-assignment with bounded trial/full-model fallback
+  is implemented and tested, but remains OFF after measurement showed overhead.
+- GitHub Actions added for worker tests on Linux, backend tests, frontend build on every
+  push/PR. Actual hosted CI execution is **not verified** until pushed/run.
+
+### Reproducible measurements (local Windows, one CP-SAT thread, seed 1)
+
+Same private ZIP documented below, via backend CSV parser and payload builder. Original
+checkout had no `withHomeroom`, despite newer assumptions in the request; baseline
+therefore has 65 registrations. The corrected runs have 73 (eight homeroom), 60 slots,
+22 rooms, 8 groups, 18 teachers, 42 subjects. Search budget 60 s. All rows below are
+single observations, not statistical estimates or Render timings. Wall includes
+matching/cleanup; build/search stats can sum to less than wall.
+
+| Step / configuration | Status | Wall s | Build s | Solve s | Peak RSS MB | Vars / constraints | C01-C13 |
+| --- | --- | ---: | ---: | ---: | ---: | --- | --- |
+| Checked-out baseline, 65 registrations, classic rooms | SUCCESS | 23.161 | 1.189 | 21.860 | 326.672 | 9064 / 11081 | C09 fail 92, C12 fail 21, C11 unresolved |
+| Room model only, same 65 registrations | SUCCESS | 1.273 | 0.408 | 0.787 | 95.004 | 5022 / 2997 | C09/C12 still fail; C11 unresolved |
+| Rule alignment + one teacher + 8 homerooms, conservative parameters | SUCCESS | 5.241 | 1.046 | 4.093 | 130.039 | 11744 / 2627 | all pass |
+| Same 73, fast profile | SUCCESS | 1.445 | 1.210 | 0.134 | 118.227 | 11744 / 2627 | all pass |
+| Same 73, default + max_presolve_iterations=1 | SUCCESS | 3.460 | 1.104 | 2.255 | 129.293 | 11744 / 2627 | all pass |
+| Same 73, default + symmetry_level=0 | SUCCESS | 5.977 | 1.411 | 4.468 | 129.344 | 11744 / 2627 | all pass |
+| Same 73, default + cp_model_probing_level=0 | SUCCESS | 2.217 | 0.994 | 1.096 | 124.309 | 11744 / 2627 | all pass |
+| Same 73, default + linearization_level=0 | SUCCESS | 5.329 | 1.181 | 4.052 | 122.465 | 11744 / 2627 | all pass |
+| Same 73, fast + teacher proposal (fell back) | SUCCESS | 2.044 | 1.283* | 0.126* | 118.000 | 11744 / 2627 | all pass |
+| No debug names + GC, local HTTP, low_ram | SUCCESS | 8.204** | 1.401 | 5.145 | 131.605 child | 11744 / 2627 | all pass |
+| No debug names + GC, local HTTP, fast | SUCCESS | 3.073** | 1.296 | 0.180 | 119.645 child | 11744 / 2627 | all pass |
+
+\* Build/search for the fallback only; outer wall includes the rejected trial.
+\*\* HTTP wall includes process startup, polling and response serialization. The low_ram
+server peak was 47.191 MB; sum of server and child peaks **178.797 MB**. Fast server
+peak 46.039 MB; combined conservative upper bound **165.684 MB**. The earlier 135 MB
+combined estimate used Windows' small venv launcher PID and was discarded/corrected.
+The manager now spawns using the real interpreter on Windows; server reports its own
+RSS rather than relying on launcher PID. No Linux/Render memory claim follows from
+these Windows measurements.
+
+Import breakdown in a fresh process with one numeric thread: Python 10.63 MB; after
+NumPy 21.13 MB; after pandas 52.99 MB; after OR-Tools 57.91 MB. OR-Tools imports pandas
+transitively in this version. We did not patch third-party imports. The task's prior
+83 MB baseline and 384/468 MB peaks were supplied evidence from a different revision/
+measurement setup, not reproduced numbers for this checkout.
+
+Decision: retain conservative `low_ram` default until actual Render sizing is known;
+`fast` is opt-in and was both faster and smaller on this dataset after removing room
+variables. Do not infer that result for arbitrary data/instances. Teacher preassignment
+was slower due to fallback and remains off. Group-by-group decomposition and greedy
+warm-start scheduling were not implemented/benchmarked; current exact model already
+meets the local speed/RAM target, and those hypotheses remain **not verified**.
+
+Final serialized HTTP reruns, saved as aggregate-only JSON in
+`diagnostics/reliability/benchmark-low_ram.json` and `benchmark-fast.json`:
+
+| Profile | HTTP wall s | Build s | Solve s | Child peak MB | Server peak MB | Combined upper bound MB | C01-C13 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| low_ram (default) | 6.914 | 1.204 | 4.276 | 131.355 | 47.551 | 178.906 | all pass |
+| fast (opt-in) | 3.552 | 1.261 | 0.142 | 119.699 | 46.645 | 166.344 | all pass |
+
+### Verification evidence
+
+- Baseline: 24 Python tests, 9 Node tests passed before changes.
+- Latest local suites: 44 Python tests and 26 Node tests passed; frontend production
+  build passed (existing large ExcelJS bundle warning). See commands in DEPLOYMENT.md.
+- Tests cover real spawned child kill/abnormal exit/wall/RSS limits, health during work,
+  queue cap/cancel/shutdown/TTL/idempotency, actual whole-worker restart/boot change/404, actual HTTP 202/413/422/legacy solve shape,
+  cancellation-before-POST race, exhaustive 512 small room-domain matching/Hall cases,
+  classic-vs-matching equivalence, one-teacher infeasibility, teacher fallback,
+  seed determinism, activity slots, and explicit advisor mapping.
+- Node HTTP stub tests inject 502/503/504 on POST and poll, dropped POST response,
+  cold-start delay, one/two worker restarts, invalid input, UNKNOWN and INFEASIBLE.
+  Failures end in named errors, never bare Axios gateway errors or false INFEASIBLE.
+- A separate actual backend process is killed mid-job and restarted against a synthetic
+  file-backed Firebase-compatible adapter. It resumes the same worker ID/key and
+  completes, with 409 and cancellation also checked. Real Firebase is **not verified**.
+- Local HTTP benchmark: backend buildSolverPayload(withHomeroom) -> worker /jobs ->
+  backend validateSchedule: C01-C13 all pass at one solver thread and 60-second limit.
+  Uploaded source rows and output schedule are never saved by the benchmark.
+
+### Data/policy issues retained, not silently repaired
+
+- Corrupted room ID `R??????`: source is unchanged; previously reported use in 11 lessons
+  is historical/user-supplied, not reverified for the new schedule.
+- Subject 21901-2012 possible name typo: unchanged; correctness of the name **not verified**.
+- Subject 21906-2006 exists in the supplied source and has **0 registrations**, verified
+  by CSV parsing. No registration invented. One source room ID contains question marks,
+  also verified; it remains unchanged.
+- T07 reported at 41 lessons/week: no load cap or eligibility changes invented; final
+  teacher-load count **not verified** beyond existing collision/required-hours checks.
+- C19 actual advisor mapping is still the owner's data task. No adviser names matched.
+- C14 now recognizes all four literal Thai IOT names; institution-specific room-lock
+  appropriateness beyond the supplied rule and those names is **not verified**.
+
+### Deployment and remaining verification
+
+See `ai_worker/DEPLOYMENT.md` for API, all limits, env vars, rollout and commands.
+**not verified**: real Render instance size, Linux RLIMIT_AS import/solve behavior,
+Docker build/run, production Firebase access/index, hosted CI run, visual interaction
+with the updated frontend, any hosted dataset solve after this patch, no stacked 503s,
+no unexplained worker restarts, and hosted elapsed time below the chosen limit.
+No local WSL Linux distribution/Docker runtime was available for Linux verification.
+
+Memory isolation is not a claim that any platform OOM can never kill the web process:
+POSIX hard address-space cap is 384 MB; sampled RSS stop is 320 MB; web/job retention
+needs additional headroom. Windows does not provide the POSIX cap and uses supervision.
+Operate one worker and one backend process/replica. In-memory mode cannot preserve
+jobs after backend process loss; Firebase mode can. Worker TTL expiry is distinguishable
+from infeasibility but reported with restart/expired-job recovery semantics.
+
 ## Latest patch — worker/validator alignment
 
 - `ai_worker/solver.py` now enforces C09 (room type from theory/practice, same predicate as validator; opt-out `enforceRoomType:false`) and C12 (activity subjects only Wed periods 8–9, others excluded there; opt-out `enforceActivitySlots:false`). One teacher per group/subject; `register.teacher_id` honoured when it is in `teach`. Output sorted.

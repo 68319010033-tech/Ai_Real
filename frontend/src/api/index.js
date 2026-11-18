@@ -76,6 +76,10 @@ export function cancelJob(jobId) {
 }
 
 export function errorMessage(e) {
+  if ([502,503,504].includes(e?.response?.status)) return 'เซิร์ฟเวอร์ยังไม่พร้อมหรือการเชื่อมต่อขัดข้อง ระบบกำลังลองตรวจสถานะอีกครั้ง'
+  if (e?.response?.status === 409) return 'มีงานจัดตารางกำลังทำงานอยู่ กำลังเปิดสถานะงานเดิม'
+  if (!e?.response && e?.isAxiosError) return 'ติดต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจการเชื่อมต่อแล้วลองอีกครั้ง'
+
   return e?.response?.data?.message ?? e?.response?.data?.error ?? e?.message ?? 'เกิดข้อผิดพลาด'
 }
 

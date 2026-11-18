@@ -13,7 +13,7 @@ const datasetVersion = computed({
     get: () => wizard.datasetVersion ?? '',
     set: (v) => wizard.setDatasetVersion(v),
 })
-const timeLimitSeconds = ref(30)
+const timeLimitSeconds = ref(60)
 const seed = ref(1)
 const specialRules = ref([])
 
@@ -22,9 +22,11 @@ const error = ref('')
 const startedAt = ref(0)
 const elapsed = ref(0)
 let timer = null
+let polling = false
+let pollFailures = 0
 
 const TERMINAL = ['completed', 'failed', 'cancelled']
-const STATUS_TEXT = { queued: 'รอคิว', running: 'กำลังคำนวณ', completed: 'เสร็จสิ้น', failed: 'ล้มเหลว', cancelled: 'ยกเลิกแล้ว' }
+const STATUS_TEXT = { waking: 'AI worker is waking up', queued: 'รอคิว', running: 'กำลังคำนวณ', completed: 'เสร็จสิ้น', failed: 'ล้มเหลว', cancelled: 'ยกเลิกแล้ว' }
 
 const running = computed(() => job.value && !TERMINAL.includes(job.value.status))
 
@@ -34,9 +36,13 @@ function stop() {
 }
 
 async function tick() {
+    if (polling || !job.value) return
+    polling = true
     try {
         const j = await getJob(job.value.jobId)
         job.value = j
+        pollFailures = 0
+        elapsed.value = j.elapsedSeconds ?? (Date.now() - startedAt.value) / 1000
         if (TERMINAL.includes(j.status)) {
             stop()
             if (j.status === 'failed') error.value = j.error || 'จัดตารางไม่สำเร็จ'
@@ -48,8 +54,11 @@ async function tick() {
             }
         } else elapsed.value = (Date.now() - startedAt.value) / 1000
     } catch (e) {
+        pollFailures++
         error.value = errorMessage(e)
-        stop()
+        if (pollFailures >= 8) stop()
+    } finally {
+        polling = false
     }
 }
 
@@ -67,9 +76,16 @@ async function start() {
         })
         job.value = { jobId, status: 'queued', solverStatus: null }
         startedAt.value = Date.now()
-        timer = setInterval(tick, 1000)
+        timer = setInterval(tick, 2500)
     } catch (e) {
         error.value = errorMessage(e)
+        const existing = e?.response?.data?.jobId
+        if (e?.response?.status === 409 && existing) {
+            job.value = { jobId: existing, status: 'queued' }
+            startedAt.value = Date.now()
+            timer = setInterval(tick, 2500)
+            await tick()
+        }
     }
 }
 
@@ -109,6 +125,10 @@ onBeforeUnmount(stop)
     <ConstraintPicker v-model="specialRules" :disabled="running" />
     <section v-if="job" class="rounded-md border border-slate-200 bg-white p-4">
         <p>สถานะงาน: <strong>{{ STATUS_TEXT[job.status] ?? job.status }}</strong></p>
+        <p v-if="job.queuePosition">ตำแหน่งในคิว: {{ job.queuePosition }}</p>
+        <p v-if="job.message && running">{{ job.message }}</p>
+        <p v-if="job.errorCode">{{ job.errorCode }}</p>
+        <p v-if="job.restartHistory?.length">AI worker restarted; one automatic retry was attempted.</p>
         <p v-if="running" class="text-slate-600">เวลาที่ผ่านไป: {{ elapsed.toFixed(0) }} วินาที</p>
         <p v-if="job.status === 'failed'" class="text-red-700">{{ job.error || error || 'จัดตารางไม่สำเร็จ' }}</p>
         <template v-if="job.status === 'completed'">
