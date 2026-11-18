@@ -13,7 +13,7 @@ onMounted(async () => {
 })
 
 const DAYS = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์']
-const PERIODS = Array.from({ length: 12 }, (_, i) => i + 1)
+const MAX_PERIOD = 12
 const LUNCH = 5 // C02: ห้ามมีเรียนคาบ 5 ทุกวัน
 
 const mode = ref('group') // group | teacher | room
@@ -21,6 +21,27 @@ const selected = ref('')
 
 const events = computed(() => store.schedule?.events ?? [])
 const slotById = computed(() => Object.fromEntries((store.schedule?.timeslots ?? []).map((t) => [t.timeslotId, t])))
+
+// แสดงเฉพาะคาบที่ใช้จริง (อย่างน้อยถึงคาบ 9) เพื่อไม่ให้ตารางกว้างจนต้องเลื่อน
+const PERIODS = computed(() => {
+  let max = 9
+  for (const e of events.value) {
+    const t = slotById.value[e.timeslotId]
+    if (t && t.period > max) max = t.period
+  }
+  return Array.from({ length: Math.min(max, MAX_PERIOD) }, (_, i) => i + 1)
+})
+
+// สีพื้นต่างกันตามวิชา (วิชาเดียวกันสีเดียวกัน)
+const hueOf = (id) => {
+  let h = 0
+  for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) % 360
+  return h
+}
+const cellStyle = (ev) => {
+  const h = hueOf(ev.subjectId)
+  return { background: `hsl(${h} 70% 94%)`, borderLeftColor: `hsl(${h} 50% 42%)` }
+}
 
 const options = computed(() => {
   const set = new Set()
@@ -66,13 +87,13 @@ const cells = computed(() => {
 const dayRows = computed(() =>
   DAYS.map((_, di) => {
     const out = []
-    for (let p = 1; p <= PERIODS.length; p++) {
+    for (let p = 1; p <= PERIODS.value.length; p++) {
       if (p === LUNCH) { out.push({ p, lunch: true, span: 1 }); continue }
       const ev = cells.value[`${di + 1}-${p}`]
       if (!ev) { out.push({ p, span: 1, ev: null, rooms: [] }); continue }
       const rooms = [ev.roomName || ev.roomId]
       let span = 1
-      while (p + span <= PERIODS.length && p + span !== LUNCH) {
+      while (p + span <= PERIODS.value.length && p + span !== LUNCH) {
         const nx = cells.value[`${di + 1}-${p + span}`]
         if (!nx || nx.subjectId !== ev.subjectId || nx.teacherId !== ev.teacherId) break
         const r = nx.roomName || nx.roomId
@@ -114,20 +135,29 @@ const dayRows = computed(() =>
 
     <div class="scroll">
       <table class="grid">
+        <colgroup>
+          <col class="c-day" />
+          <col v-for="p in PERIODS" :key="p" :class="{ 'c-lunch': p === LUNCH }" />
+        </colgroup>
         <thead>
-          <tr><th>วัน</th><th v-for="p in PERIODS" :key="p">คาบ {{ p }}</th></tr>
+          <tr><th>วัน / คาบ</th><th v-for="p in PERIODS" :key="p">{{ p === LUNCH ? 'พัก' : p }}</th></tr>
         </thead>
         <tbody>
           <tr v-for="(d, di) in DAYS" :key="d">
             <th scope="row">{{ d }}</th>
             <template v-for="c in dayRows[di]" :key="c.p">
-              <td v-if="c.lunch" class="lock"><span class="muted">พักเที่ยง</span></td>
+              <td v-if="c.lunch" class="lock"><span class="muted vtext">พักเที่ยง</span></td>
               <td v-else :colspan="c.span">
-                <div v-if="c.ev" class="ev">
-                  <strong>{{ c.ev.subjectName }}</strong>
-                  <div>{{ c.ev.teacherName || c.ev.teacherId }} · {{ c.rooms.join(' / ') }}</div>
-                  <div v-if="c.span > 1" class="muted">{{ c.span }} คาบ</div>
-                  <span v-if="c.ev.sharedEventId" class="badge">เรียนร่วม {{ c.ev.groupIds.join('+') }}</span>
+                <div
+                  v-if="c.ev"
+                  class="ev"
+                  :style="cellStyle(c.ev)"
+                  :title="`${c.ev.subjectName}\n${c.ev.teacherName || c.ev.teacherId} · ${c.rooms.join(' / ')}`"
+                >
+                  <strong class="name">{{ c.ev.subjectName }}</strong>
+                  <div class="sub">{{ c.ev.teacherName || c.ev.teacherId }} · {{ c.rooms.join(' / ') }}</div>
+                  <div v-if="c.span > 1" class="sub muted">{{ c.span }} คาบ</div>
+                  <span v-if="c.ev.sharedEventId" class="badge" :title="'เรียนร่วม ' + c.ev.groupIds.join('+')">ร่วม</span>
                 </div>
               </td>
             </template>
@@ -142,11 +172,16 @@ const dayRows = computed(() =>
 
 <style scoped>
 .panel { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.grid { border-collapse: collapse; background: var(--surface); min-width: 1100px; width: 100%; }
-.grid th, .grid td { border: 1px solid var(--line); padding: 6px; vertical-align: top; min-width: 90px; font-size: 13px; }
+.grid { border-collapse: collapse; background: var(--surface); table-layout: fixed; width: 100%; min-width: 760px; }
+.grid th, .grid td { border: 1px solid var(--line); padding: 4px; vertical-align: top; font-size: 12px; overflow: hidden; }
+.c-day { width: 64px; }
+.c-lunch { width: 28px; }
 .grid thead th { background: #eef1f6; }
 .grid tbody th { background: #eef1f6; text-align: left; white-space: nowrap; }
-.lock { background: var(--lock); text-align: center; vertical-align: middle; }
-.ev { border-left: 3px solid var(--accent); padding-left: 6px; }
-.badge { display: inline-block; margin-top: 4px; padding: 1px 6px; border: 1px solid var(--shared); color: var(--shared); border-radius: 4px; font-size: 11px; }
+.lock { background: var(--lock); text-align: center; vertical-align: middle; padding: 2px; }
+.vtext { writing-mode: vertical-rl; letter-spacing: 1px; }
+.ev { border-left: 3px solid var(--accent); padding: 2px 4px; border-radius: 3px; }
+.name { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.25; font-size: 12px; }
+.sub { font-size: 11px; line-height: 1.25; word-break: break-word; }
+.badge { display: inline-block; margin-top: 2px; padding: 0 5px; border: 1px solid var(--shared); color: var(--shared); border-radius: 4px; font-size: 10px; }
 </style>
