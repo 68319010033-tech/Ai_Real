@@ -1,6 +1,6 @@
 # Async timetable worker deployment
 
-Runtime version: `async-jobs-v3`. This branch is locally tested; production deployment,
+Runtime version: `async-jobs-v4`. This branch is locally tested; production deployment,
 Render memory/CPU limits, and absence of production 502/503/restarts are **not verified**.
 The owner chose to deploy the AI service personally; their friend deploys the backend
 and frontend. No service settings were changed by this task.
@@ -12,7 +12,7 @@ and frontend. No service settings were changed by this task.
    Install `requirements.txt`. Keep exactly one web process and one instance; jobs live
    in that process, not a shared cluster. Set the native-service thread environment
    variables shown below before Python starts.
-2. Check `GET /`: `runtime_version=async-jobs-v3`, `search_workers=1`, a nonempty
+2. Check `GET /`: `runtime_version=async-jobs-v4`, `search_workers=1`, a nonempty
    `boot_id`. `HEAD /` and favicon return 204; `GET /health` remains cheap during solves.
    Existing callers of `/solve` still receive the solver response including `stats`.
 3. Have the friend deploy the backend and frontend from the same branch. Keep
@@ -70,7 +70,7 @@ in the backend. Logs are bounded to 100 entries per job.
 | `AI_SOLVER_MEMORY_MB` | `256` | CP-SAT memory safety parameter; not a hard RSS guarantee |
 | `AI_JOB_MEMORY_MB` | `320` | Parent checks child peak RSS every 50 ms and kills excess |
 | `AI_JOB_ADDRESS_MB` | `384` | POSIX hard RLIMIT_AS before solver import; virtual address space, not RSS |
-| `AI_JOB_WALL_SECONDS` | `150` | Hard supervised total child lifetime including startup/build/search |
+| `AI_JOB_WALL_SECONDS` | `110` | Supervised child lifetime; overrides capped at 110 seconds, including startup/build/search |
 | `AI_QUEUE_LIMIT` | `4` | Waiting jobs, in addition to one active/reserved job |
 | `AI_QUEUE_WAIT_SECONDS` | `600` | Maximum queue wait before starting a job |
 | `AI_JOB_TTL_SECONDS` | `1800` | Terminal results and idempotency TTL; cleanup every 30 s |
@@ -84,7 +84,15 @@ in the backend. Logs are bounded to 100 entries per job.
 
 Payload table caps: 100 teachers, 100 rooms, 100 groups, 500 subjects, 1000 registrations,
 200 timeslots, 5000 teach rows. Registration × teacher × slot ceiling: 2,000,000.
-Search input is finite, >0 and <=120 seconds. Health does not acquire a solve lock.
+Search input remains finite, >0 and <=120 seconds for compatibility. The worker
+caps the combined model-build/search budget at 100 seconds and subtracts build time
+before starting search. Once a valid timetable is found, optimization gets at most
+five additional seconds (or the remaining budget, whichever is shorter). A timer
+stops search even if no further improvement arrives. The best feasible timetable is
+returned; minimum splitting need not be proven. The supervisor caps active child
+lifetime at 110 seconds, including older AI_JOB_WALL_SECONDS=150 overrides.
+Cold-start, network and queue waits are separate, so this is not a 120-second
+end-to-end hosted SLA. Health does not acquire a solve lock.
 
 The address-space cap is the hard allocation limit on Linux; the RSS watchdog is
 sampled and may overshoot between checks. Windows uses the RSS watchdog and real child
@@ -136,7 +144,7 @@ Backend validation checks C24/C25 before publishing SUCCESS, and the UI lists bo
 as mandatory. All three services need the new revision. Existing saved schedules can
 fail these new checks; regenerate them. Impossible input remains INFEASIBLE, and
 search exhaustion remains UNKNOWN; there is no fallback that disables the new rules.
-Runtime `async-jobs-v3` identifies this revision. Hosted behavior remains not verified.
+Runtime `async-jobs-v4` identifies this revision. Hosted behavior remains not verified.
 
 ## Solver policy and benchmark
 

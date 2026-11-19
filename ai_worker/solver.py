@@ -4,6 +4,7 @@ from collections import defaultdict
 from time import perf_counter
 from ortools.sat.python import cp_model
 from runtime_config import search_workers, configure_solver
+from search_budget import ImprovementWindow, remaining_search_seconds
 
 
 def _as_int(value, default=0):
@@ -86,12 +87,8 @@ def _normalize_constraints(constraints):
         "reservedSlots": list(data.get("reservedSlots") or []),
         "roomLocks": list(data.get("roomLocks") or []),
         "maxPeriodsPerDay": int(data.get("maxPeriodsPerDay") or 10),
-        # คาบสุดท้ายที่อนุญาต (hard) ค่าเริ่มต้น 11 = ห้ามเรียนคาบ 12; ตั้ง 0 = ไม่จำกัด
-        "maxPeriod": _as_int(data.get("maxPeriod"), _as_int(os.getenv("AI_MAX_PERIOD"), 11)),
-        # วิชาเดียวกันในวันเดียวกันต้องเรียนต่อเนื่องเป็นช่วงเดียว (hard) วิชาข้ามวันได้
-        "consecutiveSameSubject": data.get("consecutiveSameSubject") is not False,
-        # พยายามให้วิชาเดียวกันเรียนติดกันเป็นก้อนน้อยที่สุด (soft)
-        "minimizeSubjectBlocks": bool(data.get("minimizeSubjectBlocks", os.getenv("AI_MINIMIZE_BLOCKS", "1") != "0")),
+        # Optional stricter ceiling; C25 always caps the final period at 12.
+        "maxPeriod": _as_int(data.get("maxPeriod"), _as_int(os.getenv("AI_MAX_PERIOD"), 12)),
         "roomTypeMatch": data.get("enforceRoomType", data.get("roomTypeMatch", True)) is not False,
         "enforceActivitySlots": data.get("enforceActivitySlots") is not False,
         "jointMode": str(data.get("jointMode") or data.get("joint_mode") or "none").strip().lower(),
@@ -142,6 +139,7 @@ def _summarize_rejections(stats):
 
 def solve_timetable(data):
     started = perf_counter()
+    data = dict(data, time_limit_seconds=min(100.0, float(data.get("time_limit_seconds") or 60)))
     result = _dispatch_solve(data)
     result.setdefault('logs', [])
     result.setdefault('stats', {'variables':0, 'constraints':0, 'conflicts':0, 'branches':0,
@@ -440,52 +438,6 @@ def _solve_timetable(data, teacher_assignments=None):
         elif total_hours > 0:
             return {"status": "INFEASIBLE", "solver_status": "INFEASIBLE", "schedule": [], "runtime_seconds": round(perf_counter() - started, 3), "reason": f"No eligible teacher/time assignments for {g}/{s} after mandatory and selected rules", "infeasibleRules":[{"ruleId":"C01","groupId":g,"subjectId":s}]}
 
-    # วิชาเดียวกันของกลุ่มเดียวกัน: ภายในวันเดียวต้องต่อเนื่องเป็นช่วงเดียว (นับ "จุดเริ่มช่วง" ไม่เกิน 1 ต่อวัน)
-    # คาบพักเที่ยง (5) ไม่มีตัวแปร จึงตัดช่วงให้อัตโนมัติ (วิชาเดียวกันคร่อมพักเที่ยงไม่ได้)
-    block_starts = []
-    if constraints["consecutiveSameSubject"] or constraints["minimizeSubjectBlocks"]:
-        slot_period = {str(sl.get("timeslot_id")): int(sl.get("period") or 0) for sl in timeslots}
-        lits_by_gs_slot = defaultdict(list)
-        for (g, s, _tid, slot_id), var in candidate_vars.items():
-            lits_by_gs_slot[(g, s, slot_id)].append(var)
-        periods_by_gs_day = defaultdict(dict)
-        for (g, s, slot_id) in lits_by_gs_slot:
-            periods_by_gs_day[(g, s, slot_days[slot_id])][slot_period[slot_id]] = slot_id
-        consec_literal = None
-        if constraints["consecutiveSameSubject"]:
-            consec_literal = model.NewBoolVar('')
-            model.AddAssumption(consec_literal)
-            assumption_labels[consec_literal.Index()] = {"ruleId": "CONSEC",
-                "message": "Same-subject lessons on one day must be consecutive (conflicts with teacher/room/time availability)"}
-        for (g, s, _day), periods in periods_by_gs_day.items():
-            if _hours(subject_by_id.get(s, {})) <= 1:
-                continue
-            occupied = {}
-            for period, slot_id in periods.items():
-                lits = lits_by_gs_slot[(g, s, slot_id)]
-                if len(lits) == 1:
-                    occupied[period] = lits[0]
-                else:
-                    flag = model.NewBoolVar('')
-                    model.Add(flag == sum(lits))
-                    occupied[period] = flag
-            starts = []
-            for period in sorted(occupied):
-                start = model.NewBoolVar('')
-                prev = occupied.get(period - 1)
-                if prev is None:
-                    model.Add(start >= occupied[period])
-                else:
-                    model.Add(start >= occupied[period] - prev)
-                starts.append(start)
-            if consec_literal is not None and len(starts) > 1:
-                model.Add(sum(starts) <= 1).OnlyEnforceIf(consec_literal)
-            block_starts.extend(starts)
-        del lits_by_gs_slot, periods_by_gs_day
-    has_objective = bool(block_starts) and constraints["minimizeSubjectBlocks"]
-    if has_objective:
-        model.Minimize(sum(block_starts))
-
     for slot_vars in group_slots.values():
         model.Add(sum(slot_vars) <= 1)
     for day_vars in group_days.values():
@@ -555,7 +507,6 @@ def _solve_timetable(data, teacher_assignments=None):
         model.AddAllDifferent(choices)
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = max(0.01, min(120.0, time_limit))
     solver.parameters.num_search_workers = search_workers()
     solver.parameters.random_seed = _as_int(data.get("seed"), 1)
     profile = configure_solver(solver.parameters)
@@ -563,7 +514,16 @@ def _solve_timetable(data, teacher_assignments=None):
     del event_assignments, registration_vars, registration_teachers, registration_periods, group_slots, group_days, teacher_slots
     gc.collect()
     build_seconds = perf_counter() - started
-    status = solver.Solve(model)
+    remaining = remaining_search_seconds(time_limit, build_seconds)
+    if remaining <= 0:
+        return {"status": "UNKNOWN", "solver_status": "UNKNOWN", "schedule": [],
+                "reason": "Time budget exhausted while building the model; not proof of infeasibility"}
+    solver.parameters.max_time_in_seconds = remaining
+    improvement = ImprovementWindow(solver, seconds=5.0)
+    try:
+        status = solver.Solve(model, improvement)
+    finally:
+        improvement.close()
     elapsed = perf_counter() - started
     stats = {
         "variables": len(model.Proto().variables),
@@ -575,11 +535,13 @@ def _solve_timetable(data, teacher_assignments=None):
         "solveTimeSec": round(solver.WallTime(), 3),
         "searchWorkers": solver.parameters.num_search_workers,
         "profile": profile,
+        "searchBudgetSec": round(remaining, 3),
+        "firstSolutionSec": improvement.first_solution_seconds,
+        "improvementWindowSec": 5.0,
         "objective": solver.ObjectiveValue() if status in (cp_model.OPTIMAL, cp_model.FEASIBLE) else None,
         "objectiveName": "multiPeriodSubjectBlocks",
         "objectiveBound": solver.BestObjectiveBound() if status in (cp_model.OPTIMAL, cp_model.FEASIBLE) else None,
         "blockOptimalityProven": status == cp_model.OPTIMAL,
-        "objective": round(solver.ObjectiveValue(), 2) if has_objective and status in (cp_model.OPTIMAL, cp_model.FEASIBLE) else None,
     }
     logs = [
         {"level": "info", "stage": "build", "message": f"model built in {build_seconds:.3f}s; variables={stats['variables']} constraints={stats['constraints']}"},

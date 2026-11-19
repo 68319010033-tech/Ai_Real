@@ -1,5 +1,28 @@
 # Ai_Real continuation handoff
 
+## Scheduling time fix — 2026-11-19
+
+Based on integration ef49196 (merged PR #9). Merge resolution had retained two
+consecutive-block models, two objectives, and a duplicate objective statistics key.
+Removed the redundant model and retained C24/C25 with whole-block minimization.
+Restored default maxPeriod=12; the merged default 11 broke five existing tests.
+Explicit stricter maxPeriod settings remain supported.
+
+Build plus search is capped at 100 seconds; build time is deducted from search.
+After the first valid solution, a five-second timer stops further optimization,
+even when no more solutions arrive. The supervisor caps child lifetime at 110
+seconds even with an old 150-second environment override. Queue/cold-start/network
+time is separate. Budget exhaustion without a solution remains UNKNOWN, never
+INFEASIBLE. Runtime marker: async-jobs-v4. All hard rules and weekly hours remain.
+
+Verification: 67 worker tests, 33 backend tests, frontend build. Tests cover budget
+deduction, improvement timer lifecycle/no subsequent solutions, old environment
+override clamping, and the existing wall-limit process termination coverage.
+Final local private-dataset HTTP run with requested 120 seconds: SUCCESS in 53.254 s,
+all C01-C13 and C24/C25 pass; first solution at 45.729 s of search, search stopped
+at 50.769 s. Child peak 153.895 MB; combined upper bound 205.352 MB. Objective 121,
+bound 49, optimality not proven. Local observation, not hosted performance proof.
+
 ## Follow-up — prefer whole-subject blocks
 
 The user clarified that subjects should stay in one whole block whenever possible,

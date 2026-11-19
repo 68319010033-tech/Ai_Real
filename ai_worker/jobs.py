@@ -50,7 +50,7 @@ class JobManager:
         self.queue_wait = float(os.getenv('AI_QUEUE_WAIT_SECONDS', '600'))
         self.memory_limit = int(os.getenv('AI_JOB_MEMORY_MB', '320'))
         self.address_limit = int(os.getenv('AI_JOB_ADDRESS_MB', '384'))
-        self.wall_limit = float(os.getenv('AI_JOB_WALL_SECONDS', '150'))
+        self.wall_limit = min(110.0, float(os.getenv('AI_JOB_WALL_SECONDS', '110')))
         self.target = target
         self.process = self.active = self.task = None
         self.closing = False
