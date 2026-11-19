@@ -101,7 +101,7 @@ async def job_error(request, error):
 @app.get('/health')
 async def health_check():
     return {'status': 'AI Worker is running', 'busy': manager.active is not None,
-            'search_workers': search_workers(), 'runtime_version': 'async-jobs-v2', 'boot_id': manager.boot_id,
+            'search_workers': search_workers(), 'runtime_version': 'async-jobs-v3', 'boot_id': manager.boot_id,
             'server_rss_mb': memory_mb(), 'server_peak_rss_mb': memory_mb(peak=True)}
 
 @app.head('/')
