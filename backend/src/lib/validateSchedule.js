@@ -408,13 +408,19 @@ function validateSchedule(schedule, tables, specialRules = []) {
       byDay.get(key).periods.push(slot.period);
     }
     const violations = [];
+    const isolated = [];
     for (const {groupId,subjectId,day,periods} of byDay.values()) {
       periods.sort((a,b)=>a-b);
       if (periods.some((p,index)=>index > 0 && p !== periods[index-1]+1)) {
         violations.push({message:`กลุ่ม ${groupId} วิชา ${subjectId} วัน ${day} ต้องเรียนติดกันในช่วงเดียว`,groupIds:[groupId]});
       }
+      if (hoursOf(subjectId) > 1 && periods.some((p,index) =>
+        periods[index-1] !== p-1 && periods[index+1] !== p+1)) {
+        isolated.push({message:`กลุ่ม ${groupId} วิชา ${subjectId} วัน ${day} ต้องเรียนติดกันอย่างน้อย 2 คาบต่อบล็อก`,groupIds:[groupId]});
+      }
     }
     out.push(result('C24','วิชาเดียวกันของแต่ละกลุ่มต้องเรียนติดกันในแต่ละวัน',violations.length ? 'fail':'pass',violations));
+    out.push(result('C26','ห้ามแยกคาบเดี่ยวสำหรับวิชาที่มีมากกว่า 1 คาบต่อสัปดาห์',isolated.length ? 'fail':'pass',isolated));
   }
 
   return {

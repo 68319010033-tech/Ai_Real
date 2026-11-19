@@ -1,5 +1,25 @@
 # Ai_Real continuation handoff
 
+## No isolated subject lessons — 2026-11-19
+
+User confirmed no one-period fragments, allowing multiple blocks such as 3+3,
+2+2+2 and odd totals 3 or 3+2. Added always-on C26: for subjects requiring more
+than one weekly hour, each occupied day has at least two periods. C24 still makes
+them consecutive and allows only one daily block. Subjects requiring exactly one
+hour remain exempt, preserving homeroom. No weekly hours are dropped. Period 12
+remains allowed, later periods forbidden. No payload override can relax C26.
+
+Backend validation independently detects single-period fragments and uses required
+subject hours for the one-hour exemption (not the possibly truncated output count).
+UI lists C26 as mandatory. Payload records minSubjectBlockPeriods=2. Runtime v6.
+Deploy AI, backend and frontend revisions together; no deployment performed here.
+
+74 worker tests, 35 backend tests and frontend build pass. Private dataset via local
+HTTP: SUCCESS in 9.931 seconds, C01-C13/C24-C26 all pass, child peak 146.203 MB,
+combined upper bound 193.477 MB. Objective 82 blocks, optimality not proven.
+The previous test allowing 2+1 overflow was updated to 2+2 because the user changed
+that rule. Added explicit rejected singleton remainder and valid odd-total cases.
+
 ## Faster cloud scheduling follow-up — 2026-11-19
 
 Public production /health was read-only checked: async-jobs-v4, not busy, one search

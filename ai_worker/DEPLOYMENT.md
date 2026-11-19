@@ -1,6 +1,6 @@
 # Async timetable worker deployment
 
-Runtime version: `async-jobs-v5`. This branch is locally tested; production deployment,
+Runtime version: `async-jobs-v6`. This branch is locally tested; production deployment,
 Render memory/CPU limits, and absence of production 502/503/restarts are **not verified**.
 The owner chose to deploy the AI service personally; their friend deploys the backend
 and frontend. No service settings were changed by this task.
@@ -15,8 +15,9 @@ retain identical hard constraints, one search thread, and the same 100/110-secon
 budget/supervisor limits. A five-second improvement window still follows the first
 valid timetable. Explicit low_ram remains available for other datasets.
 
-Only the AI worker code needs redeployment for this performance update; the existing
-async backend/frontend protocol is unchanged. Verify v5 and fast via /health.
+The fast-profile performance change alone needed only the AI worker. The newer C26
+rule also updates backend validation and the frontend mandatory rule list: deploy
+all three revisions together. Verify v6 and fast via /health.
 
 ## Coordinated rollout
 
@@ -25,7 +26,7 @@ async backend/frontend protocol is unchanged. Verify v5 and fast via /health.
    Install `requirements.txt`. Keep exactly one web process and one instance; jobs live
    in that process, not a shared cluster. Set the native-service thread environment
    variables shown below before Python starts.
-2. Check `GET /`: `runtime_version=async-jobs-v5`, `search_workers=1`, a nonempty
+2. Check `GET /`: `runtime_version=async-jobs-v6`, `search_workers=1`, a nonempty
    `boot_id`, `solver_profile=fast`, and `active_wall_limit_seconds<=110`.
    Set `AI_SOLVER_PROFILE=fast` or remove an old `low_ram` override; explicit service
    environment values take precedence over the new default. `queued_jobs` shows
@@ -131,7 +132,7 @@ infrastructure failures.
 Keep-warm does not guarantee platform uptime. Firebase behavior is tested using a
 persistent synthetic adapter and a real backend restart, not the live database.
 
-## Additional mandatory rules (C24/C25)
+## Additional mandatory rules (C24/C25/C26)
 
 C24 requires each group's lessons of a given subject to form one consecutive block
 within each day. The subject may appear on multiple days. Period numbers define
@@ -156,11 +157,19 @@ bound, and `blockOptimalityProven` distinguishes a proven minimum from a feasibl
 result at the time limit. This preference never relaxes C24/C25. An optimal result
 under optional teacher preassignment is optimal only for that fixed assignment.
 
-Backend validation checks C24/C25 before publishing SUCCESS, and the UI lists both
+C26 additionally requires every daily block of a subject with more than one weekly
+hour to contain at least two consecutive periods. One-hour subjects (including
+one-hour homeroom) are exempt. Valid splits include 3+2, 3+3 and 2+2+2; 2+1 and
+2+1+1 are forbidden. Multiple blocks remain allowed across days, with one block per
+day under C24. Odd totals must use a block of at least three rather than an isolated
+remainder. No payload flag can disable this rule. If it cannot fit, report INFEASIBLE
+or UNKNOWN at the search limit, without dropping hours or relaxing C26.
+
+Backend validation checks C24/C25/C26 before publishing SUCCESS, and the UI lists both
 as mandatory. All three services need the new revision. Existing saved schedules can
 fail these new checks; regenerate them. Impossible input remains INFEASIBLE, and
 search exhaustion remains UNKNOWN; there is no fallback that disables the new rules.
-Runtime `async-jobs-v5` identifies this revision. Hosted behavior remains not verified.
+Runtime `async-jobs-v6` identifies this revision. Hosted behavior remains not verified.
 
 ## Solver policy and benchmark
 

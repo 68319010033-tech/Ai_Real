@@ -33,7 +33,7 @@ class HttpTests(unittest.TestCase):
     def test_health_and_payload_limits(self):
         self.assertEqual(requests.head(self.url+'/',timeout=5).status_code,204)
         self.assertEqual(requests.get(self.url+'/favicon.ico',timeout=5).status_code,204)
-        self.assertEqual(requests.get(self.url+'/health',timeout=5).json()['runtime_version'],'async-jobs-v5')
+        self.assertEqual(requests.get(self.url+'/health',timeout=5).json()['runtime_version'],'async-jobs-v6')
         health = requests.get(self.url+'/health', timeout=5).json()
         self.assertIn(health['solver_profile'], ('fast', 'low_ram'))
         self.assertLessEqual(health['active_wall_limit_seconds'], 110)

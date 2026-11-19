@@ -27,11 +27,34 @@ class SubjectBlockTests(unittest.TestCase):
                          {'S0', 'S1', 'S4', 'S5'})
 
     def test_overflow_can_skip_an_unavailable_day(self):
-        data = self.data([(1, 11), (1, 12), (1, 13), (2, 1), (3, 1)], 3)
+        data = self.data([(1, 11), (1, 12), (1, 13), (2, 1), (3, 1), (3, 2)], 4)
         data['constraints'] = {'blockedSlots': [{'day': 'Tue', 'periods': [1], 'who': 'all'}]}
         result = self.valid(data)
         self.assertEqual({row['timeslot_id'] for row in result['schedule']},
-                         {'S0', 'S1', 'S4'})
+                         {'S0', 'S1', 'S4', 'S5'})
+
+    def test_single_period_fragments_are_never_allowed(self):
+        data = self.data([(1, 1), (1, 2), (2, 1)], 3)
+        data['constraints'] = {'minSubjectBlockPeriods': 1}
+        result = solve_timetable(data)
+        self.assertEqual(result['status'], 'INFEASIBLE')
+        self.assertIn('C26', [r['ruleId'] for r in result['infeasibleRules']])
+
+    def test_five_hours_can_split_three_plus_two(self):
+        self.valid(self.data([(1, 1), (1, 2), (1, 3), (2, 11), (2, 12)], 5))
+
+    def test_six_hours_can_split_into_three_pairs(self):
+        self.valid(self.data([(d, p) for d in (1, 2, 3) for p in (11, 12)], 6))
+
+    def test_six_hours_can_split_into_two_triples(self):
+        self.valid(self.data([(d, p) for d in (1, 2) for p in (1, 2, 3)], 6))
+
+    def test_four_hours_cannot_split_two_plus_one_plus_one(self):
+        data = self.data([(1, 1), (1, 2), (2, 1), (3, 1)], 4)
+        self.assertEqual(solve_timetable(data)['status'], 'INFEASIBLE')
+
+    def test_genuinely_one_hour_subject_remains_schedulable(self):
+        self.valid(self.data([(1, 12)], 1))
 
     def test_overflow_without_another_eligible_day_is_infeasible(self):
         data = self.data([(1, 11), (1, 12), (1, 13)], 3)
