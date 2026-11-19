@@ -452,6 +452,11 @@ def _solve_timetable(data, teacher_assignments=None):
     assumption_labels[consecutive_rule.Index()] = {
         'ruleId': 'C24',
         'message': 'Each group must study a subject in one consecutive block per day; breaks cannot be bridged.'}
+    no_singletons = model.NewBoolVar('')
+    model.AddAssumption(no_singletons)
+    assumption_labels[no_singletons.Index()] = {
+        'ruleId': 'C26',
+        'message': 'Multi-hour subjects require at least two consecutive periods in every daily block; one-hour subjects are exempt.'}
     subject_block_days = defaultdict(list)
     subject_max_run = defaultdict(int)
     for (g, sid, day), periods in registration_periods.items():
@@ -475,6 +480,7 @@ def _solve_timetable(data, teacher_assignments=None):
         model.Add(sum(starts) <= 1).OnlyEnforceIf(consecutive_rule)
         active_day = model.NewBoolVar('')
         model.AddMaxEquality(active_day, list(occupied.values()))
+        model.Add(sum(occupied.values()) >= 2 * active_day).OnlyEnforceIf(no_singletons)
         subject_block_days[(g, sid)].append(active_day)
 
     # Prefer a whole subject in one block, splitting across days only as needed.

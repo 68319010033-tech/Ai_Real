@@ -62,7 +62,7 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(done['error_code'],'CHILD_EXIT')
         self.assertIn('out-of-memory',done['error'])
         with patch.object(main,'manager',self.manager):
-            self.assertEqual((await main.health_check())['runtime_version'],'async-jobs-v5')
+            self.assertEqual((await main.health_check())['runtime_version'],'async-jobs-v6')
 
     async def test_unexpected_exit_has_clear_message(self):
         self.manager.target=exited_child

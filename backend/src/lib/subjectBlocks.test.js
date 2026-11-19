@@ -2,8 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {validateSchedule} = require('./validateSchedule');
 
-function validate(slots, rows=slots.map((_,index)=>({group_id:'G0',subject_id:'S0',timeslot_id:String(index)}))) {
-  const tables={timeslot:slots.map(([day,period],index)=>({timeslot_id:String(index),day,period}))};
+function validate(slots, rows=slots.map((_,index)=>({group_id:'G0',subject_id:'S0',timeslot_id:String(index)})), hours=slots.length) {
+  const tables={timeslot:slots.map(([day,period],index)=>({timeslot_id:String(index),day,period})),
+    subject:[{subject_id:'S0',theory:hours,practice:0}]};
   return Object.fromEntries(validateSchedule({data:rows},tables).results.map(r=>[r.ruleId,r.status]));
 }
 test('consecutive blocks use period numbers, not CSV ordering, and may span days',()=>{
@@ -22,4 +23,19 @@ test('same-subject blocks are checked separately for each group',()=>{
   const slots=[[1,1],[1,2],[1,3],[1,4]];
   const rows=slots.map((_,i)=>({group_id:i<2?'G0':'G1',subject_id:'S0',timeslot_id:String(i)}));
   assert.equal(validate(slots,rows).C24,'pass');
+});
+
+test('C26 allows 3+2, 3+3 and 2+2+2 blocks',()=>{
+  for (const sizes of [[3,2],[3,3],[2,2,2]]) {
+    const slots=sizes.flatMap((size,day)=>Array.from({length:size},(_,p)=>[day+1,p+1]));
+    assert.equal(validate(slots).C26,'pass');
+  }
+});
+
+test('C26 rejects isolated lessons, including a truncated multi-hour subject',()=>{
+  for (const slots of [[[1,1],[1,2],[2,1]], [[1,1],[1,2],[2,1],[3,1]], [[1,1],[1,3]]]) {
+    assert.equal(validate(slots).C26,'fail');
+  }
+  assert.equal(validate([[1,1]],undefined,3).C26,'fail');
+  assert.equal(validate([[1,1]],undefined,1).C26,'pass');
 });

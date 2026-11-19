@@ -21,6 +21,7 @@ const BASE = [
     { id: 'C13', text: 'วิชาเรียนร่วมตามคู่ที่กำหนด: G1/G2 และ G3/G4; G5 และ G7 เรียนแยก' },
     { id: 'C24', text: 'วิชาเดียวกันของแต่ละกลุ่มต้องเรียนติดกันในวันนั้น (พยายามรวมเป็นบล็อกเดียว หากจำเป็นให้แบ่งหลายวันให้น้อยที่สุด)' },
     { id: 'C25', text: 'ห้ามเรียนหลังคาบ 12' },
+    { id: 'C26', text: 'วิชาที่มีมากกว่า 1 คาบต่อสัปดาห์ต้องเรียนบล็อกละอย่างน้อย 2 คาบติดกัน แบ่งหลายบล็อกได้ ห้ามแยกคาบเดี่ยว' },
 ]
 
 const RULES = [
@@ -43,7 +44,7 @@ function toggle(id) {
         <h2 class="font-semibold">เงื่อนไข</h2>
 
         <details class="mt-2 rounded border border-line bg-canvas px-3 py-2 text-sm">
-            <summary class="cursor-pointer font-medium">เงื่อนไขบังคับ C01–C13, C24–C25 (เปิดเสมอ)</summary>
+            <summary class="cursor-pointer font-medium">เงื่อนไขบังคับ C01–C13, C24–C26 (เปิดเสมอ)</summary>
             <ul class="mt-2 space-y-1 text-muted">
                 <li v-for="b in BASE" :key="b.id"><span class="font-medium text-ink">{{ b.id }}</span> {{ b.text }}</li>
             </ul>

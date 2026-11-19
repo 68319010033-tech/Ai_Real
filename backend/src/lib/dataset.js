@@ -138,6 +138,7 @@ function buildSolverPayload(tables, specialRules = [], timeLimitSeconds = 60, co
       maxPeriodsPerDay: Number(constraints.maxPeriodsPerDay) || 10,
       roomTypeMatch: true,
       consecutiveSubjectPerDay: true,
+      minSubjectBlockPeriods: 2,
       lastPeriod: 12,
     },
     room_locks: buildRoomLocks(tables, specialRules),
