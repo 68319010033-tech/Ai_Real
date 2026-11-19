@@ -13,17 +13,22 @@ def search_workers():
     return value
 
 
+def solver_profile():
+    profile = os.getenv('AI_SOLVER_PROFILE', 'fast')
+    if profile not in {'low_ram', 'fast'}:
+        raise ValueError('AI_SOLVER_PROFILE must be low_ram or fast')
+    return profile
+
+
 def configure_solver(parameters):
     """Measured profiles; benchmark overrides are server-owned, never payload fields."""
     import json
-    profile = os.getenv('AI_SOLVER_PROFILE', 'low_ram')
+    profile = solver_profile()
     profiles = {
         'low_ram': {},
         'fast': {'cp_model_presolve': False, 'symmetry_level': 0,
                  'cp_model_probing_level': 0, 'linearization_level': 0},
     }
-    if profile not in profiles:
-        raise ValueError('AI_SOLVER_PROFILE must be low_ram or fast')
     settings = {**profiles[profile], **json.loads(os.getenv('AI_SOLVER_BENCH_PARAMS', '{}'))}
     allowed = {'cp_model_presolve', 'max_presolve_iterations', 'symmetry_level',
                'cp_model_probing_level', 'linearization_level'}

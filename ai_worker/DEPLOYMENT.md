@@ -1,9 +1,22 @@
 # Async timetable worker deployment
 
-Runtime version: `async-jobs-v4`. This branch is locally tested; production deployment,
+Runtime version: `async-jobs-v5`. This branch is locally tested; production deployment,
 Render memory/CPU limits, and absence of production 502/503/restarts are **not verified**.
 The owner chose to deploy the AI service personally; their friend deploys the backend
 and frontend. No service settings were changed by this task.
+
+## Performance update
+
+The fast profile is now the default. On the private dataset, two local HTTP runs
+finished in 9.38/9.37 seconds, versus the previous 53.25-second low_ram run. All
+C01-C13/C24/C25 checks passed; combined peak upper bounds were approximately
+194 MB. These are local observations, not a cloud latency guarantee. Both profiles
+retain identical hard constraints, one search thread, and the same 100/110-second
+budget/supervisor limits. A five-second improvement window still follows the first
+valid timetable. Explicit low_ram remains available for other datasets.
+
+Only the AI worker code needs redeployment for this performance update; the existing
+async backend/frontend protocol is unchanged. Verify v5 and fast via /health.
 
 ## Coordinated rollout
 
@@ -12,8 +25,11 @@ and frontend. No service settings were changed by this task.
    Install `requirements.txt`. Keep exactly one web process and one instance; jobs live
    in that process, not a shared cluster. Set the native-service thread environment
    variables shown below before Python starts.
-2. Check `GET /`: `runtime_version=async-jobs-v4`, `search_workers=1`, a nonempty
-   `boot_id`. `HEAD /` and favicon return 204; `GET /health` remains cheap during solves.
+2. Check `GET /`: `runtime_version=async-jobs-v5`, `search_workers=1`, a nonempty
+   `boot_id`, `solver_profile=fast`, and `active_wall_limit_seconds<=110`.
+   Set `AI_SOLVER_PROFILE=fast` or remove an old `low_ram` override; explicit service
+   environment values take precedence over the new default. `queued_jobs` shows
+   whether other work is waiting. `HEAD /` and favicon return 204; `GET /health` remains cheap during solves.
    Existing callers of `/solve` still receive the solver response including `stats`.
 3. Have the friend deploy the backend and frontend from the same branch. Keep
    `AI_WORKER_URL=https://ai-real-ek52.onrender.com`. Backend calls `/jobs`, then polls
@@ -66,7 +82,7 @@ in the backend. Logs are bounded to 100 entries per job.
 | Worker setting | Default | Meaning |
 | --- | --- | --- |
 | `AI_SOLVER_WORKERS` | `1` | CP-SAT threads, range 1-8; retain 1 for reproducibility |
-| `AI_SOLVER_PROFILE` | `low_ram` | Conservative CP-SAT defaults; `fast` disables presolve, symmetry, probing and linearization |
+| `AI_SOLVER_PROFILE` | `fast` | Fast default disables presolve, symmetry, probing and linearization; explicit `low_ram` retains the previous profile |
 | `AI_SOLVER_MEMORY_MB` | `256` | CP-SAT memory safety parameter; not a hard RSS guarantee |
 | `AI_JOB_MEMORY_MB` | `320` | Parent checks child peak RSS every 50 ms and kills excess |
 | `AI_JOB_ADDRESS_MB` | `384` | POSIX hard RLIMIT_AS before solver import; virtual address space, not RSS |
@@ -144,7 +160,7 @@ Backend validation checks C24/C25 before publishing SUCCESS, and the UI lists bo
 as mandatory. All three services need the new revision. Existing saved schedules can
 fail these new checks; regenerate them. Impossible input remains INFEASIBLE, and
 search exhaustion remains UNKNOWN; there is no fallback that disables the new rules.
-Runtime `async-jobs-v4` identifies this revision. Hosted behavior remains not verified.
+Runtime `async-jobs-v5` identifies this revision. Hosted behavior remains not verified.
 
 ## Solver policy and benchmark
 

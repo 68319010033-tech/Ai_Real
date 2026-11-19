@@ -1,5 +1,28 @@
 # Ai_Real continuation handoff
 
+## Faster cloud scheduling follow-up — 2026-11-19
+
+Public production /health was read-only checked: async-jobs-v4, not busy, one search
+worker. No private dataset was sent to production and no deployment was performed.
+The user still observes >120 seconds end-to-end; cold starts/queues remain separate
+from active solve time. Current v4 health does not identify the selected profile.
+
+Promoted the measured fast profile to default (explicit low_ram remains supported).
+The model and all hard constraints are unchanged. v5 /health exposes solver_profile,
+active_wall_limit_seconds and queued_jobs. An existing AI_SOLVER_PROFILE=low_ram
+override must be removed or changed to fast by the deploying owner. Only the AI
+service requires deployment for this update; backend/frontend protocol unchanged.
+
+Real private dataset, local HTTP, requested 120 seconds, one thread:
+- Prior low_ram run: 53.254 s, objective 121, combined upper bound 205.352 MB.
+- Fast seed 1: 9.381 s, first solution 0.277 s into search, objective 93,
+  combined upper bound 194.434 MB.
+- New default fast seed 2: 9.368 s, first solution 0.261 s into search, objective 93,
+  combined upper bound 193.629 MB.
+All mandatory C01-C13/C24/C25 checks pass. Objective counts multi-hour subject blocks;
+optimality is not proven. Bench utility now accepts --seed and reports actual profile.
+68 worker tests pass with the new default. Hosted timing remains unverified.
+
 ## Scheduling time fix — 2026-11-19
 
 Based on integration ef49196 (merged PR #9). Merge resolution had retained two
