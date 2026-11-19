@@ -37,6 +37,30 @@ class SubjectBlockTests(unittest.TestCase):
         data = self.data([(1, 11), (1, 12), (1, 13)], 3)
         self.assertEqual(solve_timetable(data)['status'], 'INFEASIBLE')
 
+    def test_whole_block_is_preferred_over_spreading_across_days(self):
+        data = self.data([(1, 12), (2, 1), (2, 2), (2, 3)], 3)
+        result = self.valid(data)
+        self.assertEqual({row['timeslot_id'] for row in result['schedule']}, {'S1', 'S2', 'S3'})
+        self.assertTrue(result['stats']['blockOptimalityProven'])
+        self.assertEqual(result['stats']['objective'], 1)
+
+    def test_necessary_split_uses_fewest_days(self):
+        data = self.data([(day, period) for day in (1, 2, 3) for period in (1, 2)], 4)
+        result = self.valid(data)
+        slots = {s['timeslot_id']: s for s in data['timeslots']}
+        days = {slots[row['timeslot_id']]['day'] for row in result['schedule']}
+        self.assertEqual(len(days), 2)
+        self.assertEqual(result['stats']['objective'], 2)
+        self.assertEqual(result['stats']['objectiveBound'], 2)
+
+    def test_subject_over_12_hours_can_be_cut_into_daily_blocks(self):
+        data = self.data([(day, period) for day in (1, 2) for period in range(6, 14)], 14)
+        result = self.valid(data)
+        slots = {s['timeslot_id']: s for s in data['timeslots']}
+        self.assertEqual(len(result['schedule']), 14)
+        self.assertTrue(all(slots[row['timeslot_id']]['period'] <= 12 for row in result['schedule']))
+        self.assertEqual(result['stats']['objective'], 2)
+
     def test_period_13_never_used_even_if_client_attempts_override(self):
         data = self.data([(1, 13)], 1)
         data['constraints'] = {'lastPeriod': 99}

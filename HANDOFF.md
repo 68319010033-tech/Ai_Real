@@ -1,5 +1,31 @@
 # Ai_Real continuation handoff
 
+## Follow-up — prefer whole-subject blocks
+
+The user clarified that subjects should stay in one whole block whenever possible,
+with cuts across days when necessary. The solver now minimizes the total occupied
+days for multi-hour group/subject registrations. C24 makes each occupied day one
+block; C25 still forbids periods after 12. Exact weekly hours remain mandatory.
+Single-hour subjects contribute a constant and are omitted from the objective.
+Per-registration lower bounds use the longest eligible consecutive run and daily
+limit, ignoring resource competition. Lunch and all other hard rules still apply.
+
+Stats expose `objectiveName: multiPeriodSubjectBlocks`, `objective`,
+`objectiveBound`, and `blockOptimalityProven`. A time-limited FEASIBLE result is a
+valid schedule, not a guarantee of minimum splitting. With optional teacher
+preassignment, optimality is conditional on those fixed teachers.
+Tests cover moving a whole three-hour block to a day that fits, choosing two rather
+than three days when splitting is necessary, and a 14-hour subject in two legal
+daily blocks. Verification: 64 worker tests and frontend production build.
+
+Final local real-dataset HTTP benchmark (low_ram, seed 1, 60-second search):
+SUCCESS, C01-C13 and C24/C25 pass; 63.076 s HTTP wall, 1.685 s build,
+60.007 s search, 154.977 MB child peak, 52.629 MB server peak, 207.605 MB
+combined upper bound. Objective 120 blocks for multi-hour registrations, lower
+bound 49; minimum NOT proven. Model: 15,639 variables / 6,881 constraints.
+This optimization can consume the full search budget; the earlier feasibility-only
+timings below do not describe the new objective. No hosted deployment performed.
+
 ## Latest patch — 2026-11-19 consecutive subjects and period 12 ceiling
 
 Branch: `codex/consecutive-subject-period-limit`, based on merged PR #7 (3755ed3).
