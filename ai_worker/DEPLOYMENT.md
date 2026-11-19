@@ -123,6 +123,15 @@ within that day. For example, four hours may use Monday 11-12 and Tuesday 1-2,
 never Monday 11-14. Unavailable days may be skipped; no eligible space means
 INFEASIBLE, not truncated hours or an exception to the period ceiling.
 
+The solver minimizes the total number of daily blocks for subjects with more than
+one required hour. It prefers placing a whole subject on one day rather than
+scattering it across days; necessary splits use as few blocks as the search finds.
+Lunch, blocked periods, teacher/room conflicts and other hard rules still apply.
+`stats.objective` counts these blocks, `objectiveBound` reports the solver's lower
+bound, and `blockOptimalityProven` distinguishes a proven minimum from a feasible
+result at the time limit. This preference never relaxes C24/C25. An optimal result
+under optional teacher preassignment is optimal only for that fixed assignment.
+
 Backend validation checks C24/C25 before publishing SUCCESS, and the UI lists both
 as mandatory. All three services need the new revision. Existing saved schedules can
 fail these new checks; regenerate them. Impossible input remains INFEASIBLE, and

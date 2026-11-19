@@ -500,12 +500,17 @@ def _solve_timetable(data, teacher_assignments=None):
     assumption_labels[consecutive_rule.Index()] = {
         'ruleId': 'C24',
         'message': 'Each group must study a subject in one consecutive block per day; breaks cannot be bridged.'}
+    subject_block_days = defaultdict(list)
+    subject_max_run = defaultdict(int)
     for (g, sid, day), periods in registration_periods.items():
         if _hours(subject_by_id.get(sid, {})) <= 1:
             continue
         occupied = {}
         starts = []
+        run_length = 0
         for period in sorted(periods):
+            run_length = run_length + 1 if period - 1 in occupied else 1
+            subject_max_run[(g, sid)] = max(subject_max_run[(g, sid)], run_length)
             choices = periods[period]
             if len(choices) == 1:
                 occupied[period] = choices[0]
@@ -516,6 +521,21 @@ def _solve_timetable(data, teacher_assignments=None):
             model.Add(start >= occupied[period] - occupied.get(period - 1, 0))
             starts.append(start)
         model.Add(sum(starts) <= 1).OnlyEnforceIf(consecutive_rule)
+        active_day = model.NewBoolVar('')
+        model.AddMaxEquality(active_day, list(occupied.values()))
+        subject_block_days[(g, sid)].append(active_day)
+
+    # Prefer a whole subject in one block, splitting across days only as needed.
+    # Single-hour subjects have exactly one block already and add only a constant.
+    for (g, sid), days in subject_block_days.items():
+        # A safe lower bound ignores resource competition but respects the longest
+        # available consecutive run and daily limit. It helps the optimizer avoid
+        # rediscovering that a long subject cannot fit in a single short block.
+        capacity = min(subject_max_run[(g, sid)], constraints['maxPeriodsPerDay'])
+        if capacity > 0:
+            hours = _hours(subject_by_id[sid])
+            model.Add(sum(days) >= (hours + capacity - 1) // capacity).OnlyEnforceIf(consecutive_rule)
+    model.Minimize(sum(day for days in subject_block_days.values() for day in days))
 
     for event_key, busy_var in busy_vars.items():
         event_group, tid, sid, slot_id = event_key
@@ -555,6 +575,10 @@ def _solve_timetable(data, teacher_assignments=None):
         "solveTimeSec": round(solver.WallTime(), 3),
         "searchWorkers": solver.parameters.num_search_workers,
         "profile": profile,
+        "objective": solver.ObjectiveValue() if status in (cp_model.OPTIMAL, cp_model.FEASIBLE) else None,
+        "objectiveName": "multiPeriodSubjectBlocks",
+        "objectiveBound": solver.BestObjectiveBound() if status in (cp_model.OPTIMAL, cp_model.FEASIBLE) else None,
+        "blockOptimalityProven": status == cp_model.OPTIMAL,
         "objective": round(solver.ObjectiveValue(), 2) if has_objective and status in (cp_model.OPTIMAL, cp_model.FEASIBLE) else None,
     }
     logs = [
