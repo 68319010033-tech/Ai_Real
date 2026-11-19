@@ -13,6 +13,14 @@ def _as_int(value, default=0):
         return default
 
 
+def _period_number(value):
+    try:
+        number = float(value)
+        return int(number) if number.is_integer() else 0
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 def _day_number(value):
     if value is None:
         return 0
@@ -265,10 +273,12 @@ def _solve_timetable(data, teacher_assignments=None):
     room_slots = defaultdict(list)
     registration_vars = defaultdict(list)
     registration_teachers = defaultdict(lambda: defaultdict(list))
+    registration_periods = defaultdict(lambda: defaultdict(list))
     assumption_labels = {}
     group_slots = defaultdict(list)
     group_days = defaultdict(list)
     slot_days = {str(slot.get("timeslot_id")): _day_number(slot.get("day")) for slot in timeslots}
+    slot_periods = {str(slot.get("timeslot_id")): _period_number(slot.get("period")) for slot in timeslots}
     rejection_stats = defaultdict(list)
 
     for reg in registers:
@@ -304,8 +314,8 @@ def _solve_timetable(data, teacher_assignments=None):
         valid_slots = []
         for slot in timeslots:
             day = _day_number(slot.get("day"))
-            period = int(slot.get("period") or 0)
-            if period == 5 or day == 0:
+            period = _period_number(slot.get("period"))
+            if not 1 <= period <= 12 or period == 5 or day == 0:
                 continue
             valid_slots.append({"slot_id": str(slot.get("timeslot_id")), "day": day, "period": period})
         if not valid_slots:
@@ -317,8 +327,8 @@ def _solve_timetable(data, teacher_assignments=None):
             for slot in timeslots:
                 slot_id = str(slot.get("timeslot_id"))
                 day = _day_number(slot.get("day"))
-                period = int(slot.get("period") or 0)
-                if period == 5 or day == 0:
+                period = _period_number(slot.get("period"))
+                if not 1 <= period <= 12 or period == 5 or day == 0:
                     continue
                 if constraints["maxPeriod"] and period > constraints["maxPeriod"]:
                     continue
@@ -367,6 +377,7 @@ def _solve_timetable(data, teacher_assignments=None):
                 candidate_vars[key] = var
                 registration_vars[(g, s)].append(var)
                 registration_teachers[(g, s)][tid].append(var)
+                registration_periods[(g, s, slot_days[slot_id])][slot_periods[slot_id]].append(var)
                 group_slots[(g, slot_id)].append(var)
                 group_days[(g, slot_days[slot_id])].append(var)
 
@@ -399,7 +410,7 @@ def _solve_timetable(data, teacher_assignments=None):
 
     if not candidate_vars:
         return {"status": "INFEASIBLE", "solver_status": "INFEASIBLE", "schedule": [],
-                "reason": "No eligible teacher/time assignments remain after mandatory and selected rules.",
+                "reason": "No eligible teacher/time assignments remain after mandatory and selected rules (C25: periods 1-12; C02: no period 5).",
                 "infeasibleRules": [{"ruleId":"C01", "message":key, "count":len(items)} for key,items in rejection_stats.items()]}
 
     for busy_key, busy_var in busy_vars.items():
@@ -480,6 +491,32 @@ def _solve_timetable(data, teacher_assignments=None):
     for day_vars in group_days.values():
         model.Add(sum(day_vars) <= constraints["maxPeriodsPerDay"])
 
+    # C24: at most one 0->1 transition per group/subject/day. Missing periods
+    # (including lunch) remain zero, so a block cannot bridge an unavailable slot.
+    # C25 prunes periods after 12. Exact weekly hours therefore place any overflow
+    # on another eligible day, where C24 independently requires a consecutive block.
+    consecutive_rule = model.NewBoolVar('')
+    model.AddAssumption(consecutive_rule)
+    assumption_labels[consecutive_rule.Index()] = {
+        'ruleId': 'C24',
+        'message': 'Each group must study a subject in one consecutive block per day; breaks cannot be bridged.'}
+    for (g, sid, day), periods in registration_periods.items():
+        if _hours(subject_by_id.get(sid, {})) <= 1:
+            continue
+        occupied = {}
+        starts = []
+        for period in sorted(periods):
+            choices = periods[period]
+            if len(choices) == 1:
+                occupied[period] = choices[0]
+            else:
+                occupied[period] = model.NewBoolVar('')
+                model.Add(occupied[period] == sum(choices))
+            start = model.NewBoolVar('')
+            model.Add(start >= occupied[period] - occupied.get(period - 1, 0))
+            starts.append(start)
+        model.Add(sum(starts) <= 1).OnlyEnforceIf(consecutive_rule)
+
     for event_key, busy_var in busy_vars.items():
         event_group, tid, sid, slot_id = event_key
         if isinstance(event_group, tuple):
@@ -503,7 +540,7 @@ def _solve_timetable(data, teacher_assignments=None):
     solver.parameters.random_seed = _as_int(data.get("seed"), 1)
     profile = configure_solver(solver.parameters)
     import gc
-    del event_assignments, registration_vars, registration_teachers, group_slots, group_days, teacher_slots
+    del event_assignments, registration_vars, registration_teachers, registration_periods, group_slots, group_days, teacher_slots
     gc.collect()
     build_seconds = perf_counter() - started
     status = solver.Solve(model)

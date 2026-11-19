@@ -389,6 +389,34 @@ function validateSchedule(schedule, tables, specialRules = []) {
     out.push(result('C19','Homeroom taught by the explicitly mapped advisor',violations.length ? 'fail':'pass',violations));
   }
 
+  // Always-on rules; use numeric periods rather than CSV row/slot-ID order.
+  {
+    const violations = events.filter(e => {
+      const period = slots[e.timeslotId]?.period;
+      return !Number.isInteger(period) || period < 1 || period > 12;
+    }).map(e => ({message:`กลุ่ม ${e.groupId} ต้องเรียนเฉพาะคาบ 1–12`,
+      groupIds:[e.groupId], timeslotId:e.timeslotId}));
+    out.push(result('C25','เรียนได้ถึงคาบ 12 เท่านั้น',violations.length ? 'fail':'pass',violations));
+  }
+  {
+    const byDay = new Map();
+    for (const event of events) {
+      const slot = slots[event.timeslotId];
+      if (!slot) continue; // C25 reports unknown slots.
+      const key = JSON.stringify([event.groupId,event.subjectId,slot.day]);
+      if (!byDay.has(key)) byDay.set(key,{groupId:event.groupId,subjectId:event.subjectId,day:slot.day,periods:[]});
+      byDay.get(key).periods.push(slot.period);
+    }
+    const violations = [];
+    for (const {groupId,subjectId,day,periods} of byDay.values()) {
+      periods.sort((a,b)=>a-b);
+      if (periods.some((p,index)=>index > 0 && p !== periods[index-1]+1)) {
+        violations.push({message:`กลุ่ม ${groupId} วิชา ${subjectId} วัน ${day} ต้องเรียนติดกันในช่วงเดียว`,groupIds:[groupId]});
+      }
+    }
+    out.push(result('C24','วิชาเดียวกันของแต่ละกลุ่มต้องเรียนติดกันในแต่ละวัน',violations.length ? 'fail':'pass',violations));
+  }
+
   return {
     scheduleId: schedule?.scheduleId,
     results: out,

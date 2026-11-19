@@ -1,6 +1,6 @@
 # Async timetable worker deployment
 
-Runtime version: `async-jobs-v2`. This branch is locally tested; production deployment,
+Runtime version: `async-jobs-v3`. This branch is locally tested; production deployment,
 Render memory/CPU limits, and absence of production 502/503/restarts are **not verified**.
 The owner chose to deploy the AI service personally; their friend deploys the backend
 and frontend. No service settings were changed by this task.
@@ -12,7 +12,7 @@ and frontend. No service settings were changed by this task.
    Install `requirements.txt`. Keep exactly one web process and one instance; jobs live
    in that process, not a shared cluster. Set the native-service thread environment
    variables shown below before Python starts.
-2. Check `GET /`: `runtime_version=async-jobs-v2`, `search_workers=1`, a nonempty
+2. Check `GET /`: `runtime_version=async-jobs-v3`, `search_workers=1`, a nonempty
    `boot_id`. `HEAD /` and favicon return 204; `GET /health` remains cheap during solves.
    Existing callers of `/solve` still receive the solver response including `stats`.
 3. Have the friend deploy the backend and frontend from the same branch. Keep
@@ -106,6 +106,28 @@ infrastructure failures.
 
 Keep-warm does not guarantee platform uptime. Firebase behavior is tested using a
 persistent synthetic adapter and a real backend restart, not the live database.
+
+## Additional mandatory rules (C24/C25)
+
+C24 requires each group's lessons of a given subject to form one consecutive block
+within each day. The subject may appear on multiple days. Period numbers define
+adjacency: 1-2-3 is consecutive, 1-3 is not, and 4-6 does not bridge lunch at period 5.
+Blocked or missing periods also break a block. C25 forbids lessons outside integer
+periods 1-12; period 12 is allowed. The worker prunes these invalid candidates even if
+the input CSV contains later slots. These rules are always enforced and cannot be
+turned off through payload constraints. They do not replace any existing hard rules.
+
+Required weekly hours are preserved: if lessons cannot fit before period 12 on one
+day, the solver places the remaining lessons on another eligible day, consecutively
+within that day. For example, four hours may use Monday 11-12 and Tuesday 1-2,
+never Monday 11-14. Unavailable days may be skipped; no eligible space means
+INFEASIBLE, not truncated hours or an exception to the period ceiling.
+
+Backend validation checks C24/C25 before publishing SUCCESS, and the UI lists both
+as mandatory. All three services need the new revision. Existing saved schedules can
+fail these new checks; regenerate them. Impossible input remains INFEASIBLE, and
+search exhaustion remains UNKNOWN; there is no fallback that disables the new rules.
+Runtime `async-jobs-v3` identifies this revision. Hosted behavior remains not verified.
 
 ## Solver policy and benchmark
 

@@ -1,5 +1,45 @@
 # Ai_Real continuation handoff
 
+## Latest patch — 2026-11-19 consecutive subjects and period 12 ceiling
+
+Branch: `codex/consecutive-subject-period-limit`, based on merged PR #7 (3755ed3).
+User explicitly chose: on each day, a subject's lessons must be consecutive; subjects
+may span multiple days. Implemented always-on C24 per group/subject/day, and C25
+restricting lessons to integer periods 1-12 (12 included). Lunch, missing periods,
+and blocked periods break a block. No soft penalty or fallback may violate these.
+The follow-up explicitly requires overflow beyond period 12 to use another eligible
+day. Exact weekly hours plus C24/C25 enforce this without a post-solve move that
+could introduce clashes. Regression tests cover overflow, skipping a blocked day,
+and insufficient remaining space (INFEASIBLE).
+Backend validation and mandatory UI labels match. Saved policy records the new rules;
+old saved timetables must be regenerated if they fail them. Runtime: async-jobs-v3.
+
+Reproduced before change: a single required lesson in period 13 returned SUCCESS,
+and two lessons of the same subject in periods 1 and 3 returned SUCCESS. Both cases
+are now INFEASIBLE; a forced daily gap reports C24 in its sufficient conflict set.
+
+Local real dataset: 73 registrations, seed 1, one solver thread, 60-second limit.
+Both profiles return SUCCESS and pass C01-C13 plus C24/C25 via the HTTP job API.
+
+| Configuration | HTTP wall s | Build s | Search s | Child peak MB | Server peak MB | Combined peak upper bound MB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Before new rules, previous default run | 10.460 | 1.684 | 7.007 | 131.750 | 47.047 | 178.797 |
+| New hard rules, low_ram default | 24.425 | 2.703 | 19.324 | 146.137 | 49.270 | 195.406 |
+| New hard rules, fast opt-in | 6.303 | 2.582 | 0.405 | 131.980 | 47.219 | 179.199 |
+
+Single local observations, not a controlled CPU benchmark or Render guarantee. The
+model grows from 11,744 variables / 2,627 constraints to 15,343 / 6,521. Default profile
+is unchanged; fast remains opt-in. Rules are enforced with one block-start transition
+per group/subject/day, keeping missing/lunch periods as zero occupancy.
+
+Verification: 61 worker tests, 33 backend tests, frontend production build. New cases
+cover end-at-12, period 13/fractional/invalid periods, gaps/lunch/blocked periods,
+multi-day blocks, unordered CSV rows, intervening subjects, approved joint pairs,
+and matching backend checks. Production deployment, live scheduling, and timings on
+Render are **not verified**. The owner continues to handle AI deployment; their friend
+handles backend/frontend. No source CSVs or generated personal schedules are committed.
+
+
 ## PR #7 merge preparation — 2026-11-18
 
 Merged current integration into the PR branch to resolve overlapping worker/validator
