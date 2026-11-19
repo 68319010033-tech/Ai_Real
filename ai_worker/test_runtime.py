@@ -6,7 +6,7 @@ from unittest.mock import patch
 from pydantic import ValidationError
 import main
 from jobs import JobManager, JobError
-from runtime_config import search_workers
+from runtime_config import search_workers, solver_profile
 from test_solver import fixture
 
 
@@ -62,7 +62,7 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(done['error_code'],'CHILD_EXIT')
         self.assertIn('out-of-memory',done['error'])
         with patch.object(main,'manager',self.manager):
-            self.assertEqual((await main.health_check())['runtime_version'],'async-jobs-v4')
+            self.assertEqual((await main.health_check())['runtime_version'],'async-jobs-v5')
 
     async def test_unexpected_exit_has_clear_message(self):
         self.manager.target=exited_child
@@ -128,6 +128,15 @@ class JobTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_profile_defaults_to_fast_and_allows_explicit_fallback(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(solver_profile(), 'fast')
+        with patch.dict(os.environ, {'AI_SOLVER_PROFILE': 'low_ram'}):
+            self.assertEqual(solver_profile(), 'low_ram')
+        with patch.dict(os.environ, {'AI_SOLVER_PROFILE': 'typo'}):
+            with self.assertRaises(ValueError):
+                solver_profile()
+
     def test_server_controls_worker_limit(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(search_workers(),1)

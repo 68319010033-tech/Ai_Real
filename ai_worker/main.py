@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import List, Dict, Any
 from jobs import JobManager, JobError
-from runtime_config import search_workers
+from runtime_config import search_workers, solver_profile
 from memory_usage import memory_mb
 
 manager = JobManager()
@@ -101,7 +101,9 @@ async def job_error(request, error):
 @app.get('/health')
 async def health_check():
     return {'status': 'AI Worker is running', 'busy': manager.active is not None,
-            'search_workers': search_workers(), 'runtime_version': 'async-jobs-v4', 'boot_id': manager.boot_id,
+            'solver_profile': solver_profile(), 'active_wall_limit_seconds': manager.wall_limit,
+            'queued_jobs': sum(job['status'] == 'queued' for job in manager.jobs.values()),
+            'search_workers': search_workers(), 'runtime_version': 'async-jobs-v5', 'boot_id': manager.boot_id,
             'server_rss_mb': memory_mb(), 'server_peak_rss_mb': memory_mb(peak=True)}
 
 @app.head('/')

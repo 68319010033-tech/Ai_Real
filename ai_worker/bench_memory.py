@@ -27,6 +27,7 @@ def main():
     parser.add_argument('--without-homeroom', action='store_true')
     parser.add_argument('--http', action='store_true', help='Run through a local Uvicorn job API')
     parser.add_argument('--seconds', type=float, default=60)
+    parser.add_argument('--seed', type=int, default=1)
     args = parser.parse_args()
     if args.child:
         from memory_usage import memory_mb
@@ -54,9 +55,9 @@ if (input.homeroom) {
   tables = withHomeroom(tables);
 }
 const payload = buildSolverPayload(tables, [], input.seconds, {roomTypeMatch:true});
-payload.seed = 1;
+payload.seed = input.seed;
 process.stdout.write(JSON.stringify({tables,payload}));
-''', {'files': files, 'homeroom': not args.without_homeroom, 'seconds': args.seconds})
+''', {'files': files, 'homeroom': not args.without_homeroom, 'seconds': args.seconds, 'seed': args.seed})
     env = {**os.environ, 'AI_SOLVER_WORKERS': '1', 'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1'}
     if args.http:
         import requests
@@ -110,7 +111,7 @@ process.stdout.write(JSON.stringify({tables,payload}));
     result = measured.pop('result')
     summary = {**measured, 'status': result['status'], 'stats': result.get('stats'),
                'counts': {k: len(v) for k,v in converted['payload'].items() if isinstance(v, list)},
-               'profile': env.get('AI_SOLVER_PROFILE', 'low_ram')}
+               'profile': result.get('stats', {}).get('profile'), 'seed': args.seed}
     if result['status'] == 'SUCCESS':
         report = node('''
 const fs = require('fs');
